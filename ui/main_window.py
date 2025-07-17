@@ -1,5 +1,6 @@
 from PyQt5.QtWidgets import QMainWindow, QTabWidget, QWidget, QApplication
 from PyQt5.QtGui import QIcon
+from ui.perfumes_view import PerfumesView
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -15,3 +16,4 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(QWidget(), "Wysyłka")
         self.tabs.addTab(QWidget(), "Wiadomości")
         self.tabs.addTab(QWidget(), "Statystyki")
+        self.tabs.addTab(PerfumesView(), "Perfumy")
