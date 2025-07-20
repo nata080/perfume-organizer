@@ -1,16 +1,13 @@
-from models.database import Base, engine
-from models.perfume import Perfume
-from models.order import Order
 import sys
 from PyQt5.QtWidgets import QApplication
+from models.database import Base, engine
 from ui.main_window import MainWindow
-from models.order_item import OrderItem
 
-
-
+# Tworzy tabele w bazie danych (tylko za pierwszym razem)
 Base.metadata.create_all(engine)
 
-app = QApplication(sys.argv)
-window = MainWindow()
-window.show()
-sys.exit(app.exec_())
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec_())
