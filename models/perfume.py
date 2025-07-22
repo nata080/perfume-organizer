@@ -1,16 +1,31 @@
-from sqlalchemy import Column, Integer, String, Float
+from sqlalchemy import Column, Integer, String, Float, Boolean
 from models.database import Base
 
 class Perfume(Base):
     __tablename__ = 'perfumes'
     
     id = Column(Integer, primary_key=True)
+    status = Column(String, default='Dostępny')  # Dostępny/Niedostępny
     brand = Column(String)
     name = Column(String)
     to_decant = Column(Float)  # ml do odlania
     remaining = Column(Float, default=0.0)  # automatycznie (to_decant - zamówione)
     price_per_ml = Column(Float)
     purchase_price = Column(Float)
+    fragrantica_url = Column(String)  # Link do Fragrantica
+    
+    # Gender categories
+    is_feminine = Column(Boolean, default=False)
+    is_masculine = Column(Boolean, default=False)
+    is_unisex = Column(Boolean, default=False)
+    
+    # Fragrance notes
+    top_notes = Column(String)  # JSON string or comma-separated
+    heart_notes = Column(String)  # JSON string or comma-separated
+    base_notes = Column(String)  # JSON string or comma-separated
+    
+    # Image data (can store path or base64)
+    image_data = Column(String)
     
     # Pola automatyczne
     order_count = Column(Integer, default=0)  # liczba zamówień
