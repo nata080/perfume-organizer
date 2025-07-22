@@ -6,11 +6,11 @@ from PyQt5.QtWidgets import (
     QCheckBox, QHeaderView, QDateEdit, QMessageBox, QInputDialog
 )
 from PyQt5.QtCore import QDate, Qt
-from PyQt5.QtGui import QColor
 from models.database import Session
 from models.perfume import Perfume
 from models.order_item import OrderItem
 from models.order import Order
+from ui.message_popup import MessagePopup
 
 ORDER_VIAL_COST = 4.0
 SHIPPING_OPTIONS = {
@@ -36,20 +36,18 @@ class AddOrderDialog(QDialog):
 
         # Tabela pozycji
         self.items_table = QTableWidget(0, 5)
-        self.items_table.setHorizontalHeaderLabels([
-            "Perfumy", "Ilość (ml)", "Cena za ml", "Część zam.", "gratis"
-        ])
+        self.items_table.setHorizontalHeaderLabels(["Perfumy", "Ilość (ml)", "Cena za ml", "Część zam.", "gratis"])
         self.items_table.setColumnHidden(4, True)
         self.items_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         layout.addWidget(self.items_table)
 
-        # Przyciski dodawania pozycji
+        # Dodawanie
         btns = QHBoxLayout()
         add_btn = QPushButton("Dodaj perfumy")
         add_btn.clicked.connect(self.add_item_row)
-        btns.addWidget(add_btn)
         gratis_btn = QPushButton("+gratis")
         gratis_btn.clicked.connect(self.add_gratis)
+        btns.addWidget(add_btn)
         btns.addWidget(gratis_btn)
         layout.addLayout(btns)
 
@@ -58,7 +56,7 @@ class AddOrderDialog(QDialog):
         ship_layout.addWidget(QLabel("Wysyłka:"))
         self.shipping_combo = QComboBox()
         self.shipping_combo.addItem("", None)
-        for k,v in SHIPPING_OPTIONS.items():
+        for k, v in SHIPPING_OPTIONS.items():
             self.shipping_combo.addItem(f"{k} ({v:.2f} zł)", k)
         self.shipping_combo.currentIndexChanged.connect(self.recalculate_total)
         ship_layout.addWidget(self.shipping_combo)
@@ -81,7 +79,7 @@ class AddOrderDialog(QDialog):
             cb_layout.addWidget(cb)
         layout.addLayout(cb_layout)
 
-        # Data sprzedaży
+        # Data
         date_layout = QHBoxLayout()
         date_layout.addWidget(QLabel("Data sprzedaży:"))
         self.sale_date_edit = QDateEdit(QDate.currentDate())
@@ -91,33 +89,32 @@ class AddOrderDialog(QDialog):
         date_layout.addWidget(self.sale_date_edit)
         layout.addLayout(date_layout)
 
-        # Zapis/Anuluj
+        # Zapis / Generuj wiadomość / Anuluj
         action_layout = QHBoxLayout()
+        msg_btn = QPushButton("Generuj wiadomość")
+        msg_btn.clicked.connect(self.generate_message_popup)
         save_btn = QPushButton("Zapisz zamówienie")
         save_btn.clicked.connect(self.save_order)
         cancel_btn = QPushButton("Anuluj")
         cancel_btn.clicked.connect(self.reject)
+        action_layout.addWidget(msg_btn)
         action_layout.addWidget(save_btn)
         action_layout.addWidget(cancel_btn)
         layout.addLayout(action_layout)
 
         self._perfume_cache = self.session.query(Perfume).all()
-        self.items_table.cellChanged.connect(lambda r,c: self.update_price_for_row(r))
+        self.items_table.cellChanged.connect(lambda r, c: self.update_price_for_row(r))
 
-        # Jeśli edycja, wypełnij okno
         if self.order_to_edit:
             self.fill_with_order(self.order_to_edit)
         else:
             self.add_item_row()
 
     def fill_with_order(self, order):
-        # Ustaw pola główne
         self.buyer_input.setText(order.buyer or "")
-        # Ustaw wysyłkę
         idx = self.shipping_combo.findData(order.shipping and order.shipping in SHIPPING_OPTIONS and order.shipping)
         if idx >= 0:
             self.shipping_combo.setCurrentIndex(idx)
-        # Checkboxy
         self.cb_msg.setChecked(bool(order.sent_message))
         self.cb_money.setChecked(bool(order.received_money))
         self.cb_label.setChecked(bool(order.generated_label))
@@ -126,30 +123,24 @@ class AddOrderDialog(QDialog):
         self.cb_confirm.setChecked(bool(order.confirmation_obtained))
         if order.sale_date:
             self.sale_date_edit.setDate(QDate(order.sale_date.year, order.sale_date.month, order.sale_date.day))
-
-        # Wyczyść tabelę i wczytaj pozycje
         self.items_table.setRowCount(0)
         items = self.session.query(OrderItem).filter_by(order_id=order.id).all()
         for oi in items:
-            p = next((x for x in self._perfume_cache if x.id==oi.perfume_id), None)
-            self.add_item_row(perfume_obj=p, is_gratis=(oi.price_per_ml==0), qty_val=int(oi.quantity_ml))
+            p = next((x for x in self._perfume_cache if x.id == oi.perfume_id), None)
+            self.add_item_row(perfume_obj=p, is_gratis=(oi.price_per_ml == 0), qty_val=int(oi.quantity_ml))
 
     def add_item_row(self, perfume_obj=None, is_gratis=False, qty_val=None):
         row = self.items_table.rowCount()
         self.items_table.insertRow(row)
-
-        # Perfume combo
         combo = QComboBox()
         for p in self._perfume_cache:
             label = f"{p.brand} {p.name}"
             combo.addItem(label, p.id)
         if perfume_obj:
-            idx = next((i for i,p in enumerate(self._perfume_cache) if p.id==perfume_obj.id), 0)
+            idx = next((i for i, p in enumerate(self._perfume_cache) if p.id == perfume_obj.id), 0)
             combo.setCurrentIndex(idx)
-        combo.currentIndexChanged.connect(lambda _,r=row: self.update_price_for_row(r))
-        self.items_table.setCellWidget(row,0,combo)
-
-        # Qty combo
+        combo.currentIndexChanged.connect(lambda _, r=row: self.update_price_for_row(r))
+        self.items_table.setCellWidget(row, 0, combo)
         qty_cb = QComboBox()
         if is_gratis:
             qty_cb.addItem("3", 3)
@@ -157,26 +148,21 @@ class AddOrderDialog(QDialog):
         else:
             for v in ML_OPTIONS:
                 qty_cb.addItem(str(v), v)
-            if qty_val:
-                try: qty_cb.setCurrentIndex(ML_OPTIONS.index(qty_val))
-                except: pass
-        qty_cb.currentIndexChanged.connect(lambda _,r=row: self.update_price_for_row(r))
-        self.items_table.setCellWidget(row,1,qty_cb)
-
-        # Price and part items
-        for col in (2,3):
+        if qty_val:
+            try: qty_cb.setCurrentIndex(ML_OPTIONS.index(qty_val))
+            except: pass
+        qty_cb.currentIndexChanged.connect(lambda _, r=row: self.update_price_for_row(r))
+        self.items_table.setCellWidget(row, 1, qty_cb)
+        for col in (2, 3):
             item = QTableWidgetItem("0.00")
             if is_gratis:
-                item.setFlags(Qt.ItemIsSelectable|Qt.ItemIsEnabled)
+                item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
             else:
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-            self.items_table.setItem(row,col,item)
-
-        # Gratis flag
+            self.items_table.setItem(row, col, item)
         flag = QTableWidgetItem("1" if is_gratis else "0")
-        flag.setFlags(Qt.ItemIsSelectable|Qt.ItemIsEnabled)
-        self.items_table.setItem(row,4,flag)
-
+        flag.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+        self.items_table.setItem(row, 4, flag)
         self.update_price_for_row(row)
 
     def add_gratis(self):
@@ -187,75 +173,63 @@ class AddOrderDialog(QDialog):
             self.add_item_row(perfume_obj=p, is_gratis=True)
 
     def update_price_for_row(self, row):
-        # Ensure flag exists
-        flag = self.items_table.item(row,4)
+        flag = self.items_table.item(row, 4)
         if flag is None:
             flag = QTableWidgetItem("0")
-            flag.setFlags(Qt.ItemIsSelectable|Qt.ItemIsEnabled)
-            self.items_table.setItem(row,4,flag)
-        is_gratis = (flag.text()=="1")
-
-        combo = self.items_table.cellWidget(row,0)
-        qty_cb = self.items_table.cellWidget(row,1)
+            flag.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+            self.items_table.setItem(row, 4, flag)
+        is_gratis = (flag.text() == "1")
+        combo = self.items_table.cellWidget(row, 0)
+        qty_cb = self.items_table.cellWidget(row, 1)
         pid = combo.currentData() if combo else None
-        p = next((x for x in self._perfume_cache if x.id==pid), None)
+        p = next((x for x in self._perfume_cache if x.id == pid), None)
         price_ml = p.price_per_ml if p and not is_gratis else 0
-
-        # Price cell
-        price_item = self.items_table.item(row,2)
+        price_item = self.items_table.item(row, 2)
         if price_item is None:
             price_item = QTableWidgetItem("0.00")
-            self.items_table.setItem(row,2,price_item)
+            self.items_table.setItem(row, 2, price_item)
         price_item.setText(f"{price_ml:.2f}")
-
-        # Part sum
         qty = qty_cb.currentData() or 0
         part = 0 if is_gratis else price_ml * qty
-        part_item = self.items_table.item(row,3)
+        part_item = self.items_table.item(row, 3)
         if part_item is None:
             part_item = QTableWidgetItem("0.00")
-            self.items_table.setItem(row,3,part_item)
+            self.items_table.setItem(row, 3, part_item)
         part_item.setText(f"{part:.2f}")
-
         self.recalculate_total()
 
     def recalculate_total(self):
-        total=0; cnt=0
+        total = 0; cnt = 0
         for r in range(self.items_table.rowCount()):
-            if self.items_table.item(r,4).text()=="1":
+            if self.items_table.item(r, 4).text() == "1":
                 continue
-            part = float(self.items_table.item(r,3).text().replace(',','.'))
+            part = float(self.items_table.item(r, 3).text().replace(',', '.'))
             total += part
-            cnt +=1
-        ship = SHIPPING_OPTIONS.get(self.shipping_combo.currentData(),0)
-        total += ship + cnt*ORDER_VIAL_COST
+            cnt += 1
+        ship = SHIPPING_OPTIONS.get(self.shipping_combo.currentData(), 0)
+        total += ship + cnt * ORDER_VIAL_COST
         self.total_label.setText(f"Suma do zapłaty: {total:.2f} zł")
 
     def save_order(self):
         from models.order_item import OrderItem
-
-        # Validate positions
         rc = self.items_table.rowCount()
-        if rc==0:
-            QMessageBox.warning(self,"Błąd","Dodaj przynajmniej jedną pozycję!")
+        if rc == 0:
+            QMessageBox.warning(self, "Błąd", "Dodaj przynajmniej jedną pozycję!")
             return
-        ok=False
+        ok = False
         for r in range(rc):
-            price = float(self.items_table.item(r,2).text().replace(',','.'))
-            qty = self.items_table.cellWidget(r,1).currentData() or 0
-            if price>0 and qty>0:
-                ok=True; break
+            price = float(self.items_table.item(r, 2).text().replace(',', '.'))
+            qty = self.items_table.cellWidget(r, 1).currentData() or 0
+            if price > 0 and qty > 0:
+                ok = True
+                break
         if not ok:
-            QMessageBox.warning(self,"Błąd","Przynajmniej jedna pozycja musi być płatna!")
+            QMessageBox.warning(self, "Błąd", "Przynajmniej jedna pozycja musi być płatna!")
             return
-
-        # Validate buyer
         buyer = self.buyer_input.text().strip()
         if not buyer:
-            QMessageBox.warning(self,"Błąd","Wprowadź kupującego!")
+            QMessageBox.warning(self, "Błąd", "Wprowadź kupującego!")
             return
-
-        # Prepare Order
         if self.order_to_edit:
             order = self.order_to_edit
         else:
@@ -263,7 +237,7 @@ class AddOrderDialog(QDialog):
             Session.add(order)
         order.buyer = buyer
         ship = self.shipping_combo.currentData()
-        order.shipping = SHIPPING_OPTIONS.get(ship,0)
+        order.shipping = SHIPPING_OPTIONS.get(ship, 0)
         order.total = self.calc_total()
         order.sent_message = self.cb_msg.isChecked()
         order.received_money = self.cb_money.isChecked()
@@ -276,42 +250,94 @@ class AddOrderDialog(QDialog):
         try:
             Session.query(OrderItem).filter_by(order_id=order.id).delete()
             for r in range(rc):
-                is_g = self.items_table.item(r,4).text()=="1"
-                pid = self.items_table.cellWidget(r,0).currentData()
-                qty = self.items_table.cellWidget(r,1).currentData() or 0
-                p = float(self.items_table.item(r,2).text().replace(',','.'))
-                part = float(self.items_table.item(r,3).text().replace(',','.'))
-                itm = OrderItem(
-                    order_id=order.id,
-                    perfume_id=pid,
-                    quantity_ml=qty,
-                    price_per_ml=0 if is_g else p,
-                    partial_sum=0 if is_g else part
-                )
+                is_g = self.items_table.item(r, 4).text() == "1"
+                pid = self.items_table.cellWidget(r, 0).currentData()
+                qty = self.items_table.cellWidget(r, 1).currentData() or 0
+                p = float(self.items_table.item(r, 2).text().replace(',', '.'))
+                part = float(self.items_table.item(r, 3).text().replace(',', '.'))
+                itm = OrderItem(order_id=order.id, perfume_id=pid,
+                    quantity_ml=qty, price_per_ml=0 if is_g else p,
+                    partial_sum=0 if is_g else part)
                 Session.add(itm)
             Session.commit()
         except Exception as e:
             Session.rollback()
-            QMessageBox.critical(self,"Błąd zapisu",str(e))
+            QMessageBox.critical(self, "Błąd zapisu", str(e))
             return
         finally:
             Session.remove()
-
-        QMessageBox.information(self,"Sukces","Zamówienie zapisane")
+        QMessageBox.information(self, "Sukces", "Zamówienie zapisane")
         self.accept()
 
-    def clear_inputs(self):
-        for w in (self.brand_input,self.name_input,
-                  self.to_decant_input,self.price_per_ml_input,
-                  self.buy_price_input):
-            w.clear()
-
     def calc_total(self):
-        total=0; cnt=0
+        total = 0
+        cnt = 0
         for r in range(self.items_table.rowCount()):
-            if self.items_table.item(r,4).text()=="1":
+            if self.items_table.item(r, 4).text() == "1":
                 continue
-            total += float(self.items_table.item(r,3).text().replace(',','.'))
-            cnt +=1
-        ship = SHIPPING_OPTIONS.get(self.shipping_combo.currentData(),0)
-        return total + ship + cnt*ORDER_VIAL_COST
+            total += float(self.items_table.item(r, 3).text().replace(',', '.'))
+            cnt += 1
+        ship = SHIPPING_OPTIONS.get(self.shipping_combo.currentData(), 0)
+        return total + ship + cnt * ORDER_VIAL_COST
+
+    def generate_message_popup(self):
+        def fmt(v):
+            return f"{int(v)}" if float(v) == int(v) else f"{v:.2f}".replace(".", ",")
+
+        items_summary = []
+        cnt = 0
+        total = 0
+        perfume_map = {p.id: p for p in self._perfume_cache}
+
+        for r in range(self.items_table.rowCount()):
+            if self.items_table.item(r, 4).text() == "1":
+                continue  # pomiń gratisy
+            pid = self.items_table.cellWidget(r, 0).currentData()
+            qty = self.items_table.cellWidget(r, 1).currentData() or 0
+            price = float(self.items_table.item(r, 2).text().replace(",", "."))
+            part = float(self.items_table.item(r, 3).text().replace(",", "."))
+            perfume = perfume_map.get(pid)
+            if not perfume:
+                continue
+            label = f"{perfume.brand} {perfume.name}"
+            items_summary.append(f"{label} -> {fmt(qty)} x {fmt(price)} = {fmt(part)}zł")
+            total += part
+            cnt += 1
+
+        vial_sum = cnt * 4
+        total += vial_sum
+
+        delivery = self.shipping_combo.currentData()
+        delivery_txt = ""
+        delivery_cost = 0
+
+        if delivery == "DPD":
+            delivery_txt = "\nZa dostawę DPD doliczamy 10zł"
+            delivery_cost = 10
+        elif delivery == "InPost":
+            delivery_txt = "\nZa dostawę inPost doliczamy 12zł"
+            delivery_cost = 12
+        else:
+            delivery_txt = "\nZa dostawę doliczamy 10zł (DPD), 12zł (inPost) lub własna etykieta (wtedy nic)"
+
+        total_with_delivery = total + delivery_cost
+
+        # Zbuduj wiadomość
+        msg = "podsumowanie:\n" + "\n".join(items_summary)
+
+        if cnt == 1:
+            msg += "\ndekant = 4zł"
+        else:
+            msg += f"\ndekanty -> {cnt} x 4 = {fmt(vial_sum)}zł"
+
+        if delivery in ("DPD", "InPost"):
+            msg += f"\n{delivery_txt}"
+            msg += f"\nRazem: {fmt(total_with_delivery)}zł"
+        else:
+            msg += f"\n\nRazem: {fmt(total)}zł"
+            msg += f"\n{delivery_txt}"
+
+        msg += "\n\nBLIK: 694604172\nJeśli potrzeba, mogę podać numer konta bankowego"
+
+        from ui.message_popup import MessagePopup
+        MessagePopup(msg, parent=self, checkbox_to_mark=self.cb_msg).exec_()
