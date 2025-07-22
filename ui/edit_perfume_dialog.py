@@ -82,6 +82,22 @@ class EditPerfumeDialog(QDialog):
         gender_row.addWidget(self.cb_unisex)
         left_col.addLayout(gender_row)
 
+        season_row = QHBoxLayout()
+        season_row.addWidget(QLabel("Pora roku:"))
+        self.cb_spring = QCheckBox("Wiosna")
+        self.cb_summer = QCheckBox("Lato")
+        self.cb_autumn = QCheckBox("Jesień")
+        self.cb_winter = QCheckBox("Zima")
+        self.cb_spring.setChecked(bool(perfume.season_spring))
+        self.cb_summer.setChecked(bool(perfume.season_summer))
+        self.cb_autumn.setChecked(bool(perfume.season_autumn))
+        self.cb_winter.setChecked(bool(perfume.season_winter))
+        season_row.addWidget(self.cb_spring)
+        season_row.addWidget(self.cb_summer)
+        season_row.addWidget(self.cb_autumn)
+        season_row.addWidget(self.cb_winter)
+        left_col.addLayout(season_row)
+
         # Obraz
         img_row = QHBoxLayout()
         self.img_label = QLabel()
@@ -178,5 +194,9 @@ class EditPerfumeDialog(QDialog):
             "top_notes": list_to_str(self.top_notes_list),
             "heart_notes": list_to_str(self.heart_notes_list),
             "base_notes": list_to_str(self.base_notes_list),
-            "image_data": self.image_data
+            "image_data": self.image_data,
+            "season_spring": self.cb_spring.isChecked(),
+            "season_summer": self.cb_summer.isChecked(),
+            "season_autumn": self.cb_autumn.isChecked(),
+            "season_winter": self.cb_winter.isChecked(),
         }
