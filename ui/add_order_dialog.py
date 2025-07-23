@@ -1,12 +1,12 @@
 # ui/add_order_dialog.py
 
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QTableWidget, QTableWidgetItem, QComboBox, QPushButton,
-    QCheckBox, QHeaderView, QDateEdit, QMessageBox, QInputDialog
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QTableWidget, QTableWidgetItem,
+    QComboBox, QPushButton, QCheckBox, QHeaderView, QDateEdit, QMessageBox, QInputDialog
 )
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QDoubleValidator
 from PyQt5.QtCore import QDate, Qt
+
 from models.database import Session
 from models.perfume import Perfume
 from models.order_item import OrderItem
@@ -22,9 +22,8 @@ class AddOrderDialog(QDialog):
         super().__init__(parent)
         self.session = Session()
         self.order_to_edit = order_to_edit
-
         self.setWindowTitle("Nowe zamówienie" if not order_to_edit else "Edytuj zamówienie")
-        self.resize(800, 500)
+        self.resize(900, 600)
         base_font = QFont()
         base_font.setPointSize(9)
         self.setFont(base_font)
@@ -39,12 +38,12 @@ class AddOrderDialog(QDialog):
         form.addWidget(self.buyer_input)
         layout.addLayout(form)
 
-        # Tabela pozycji
-        self.items_table = QTableWidget(0, 5)
+        # Tabela pozycji zamówienia
+        self.items_table = QTableWidget(0, 6)  # dodatkowa kolumna Flakon
         self.items_table.setHorizontalHeaderLabels(
-            ["Perfumy", "Ilość (ml)", "Cena za ml", "Część zam.", "gratis"]
+            ["Perfumy", "Ilość (ml)", "Cena za ml", "Część zam.", "gratis", "Flakon"]
         )
-        self.items_table.setColumnHidden(4, True)
+        self.items_table.setColumnHidden(4, True)  # ukryte 'gratis'
         self.items_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         layout.addWidget(self.items_table)
 
@@ -53,9 +52,11 @@ class AddOrderDialog(QDialog):
         add_btn = QPushButton("Dodaj perfumy")
         add_btn.clicked.connect(lambda: self.add_item_row(default_ml=5))
         btns.addWidget(add_btn)
+
         gratis_btn = QPushButton("+ Gratis")
         gratis_btn.clicked.connect(self.add_gratis_row)
         btns.addWidget(gratis_btn)
+
         btns.addStretch()
         layout.addLayout(btns)
 
@@ -114,6 +115,7 @@ class AddOrderDialog(QDialog):
 
         # Cache perfum
         self._perfume_cache = self.session.query(Perfume).all()
+
         self.items_table.cellChanged.connect(lambda r, c: self.update_price_for_row(r))
 
         # Inicjalizacja wierszy
@@ -126,7 +128,7 @@ class AddOrderDialog(QDialog):
         row = self.items_table.rowCount()
         self.items_table.insertRow(row)
 
-        # Perfumy
+        # Perfumy - QComboBox
         combo = QComboBox()
         combo.setFont(self.font())
         for p in self._perfume_cache:
@@ -137,41 +139,82 @@ class AddOrderDialog(QDialog):
         combo.currentIndexChanged.connect(lambda _, r=row: self.update_price_for_row(r))
         self.items_table.setCellWidget(row, 0, combo)
 
-        # Ilość (ml)
-        qty_cb = QComboBox()
+        # Ilość (ml) - QComboBox domyślnie
+        qty_widget = QComboBox()
         for ml in ML_OPTIONS:
-            qty_cb.addItem(str(ml), ml)
+            qty_widget.addItem(str(ml), ml)
         if default_ml in ML_OPTIONS:
-            qty_cb.setCurrentIndex(ML_OPTIONS.index(default_ml))
-        qty_cb.currentIndexChanged.connect(lambda _, r=row: self.update_price_for_row(r))
-        self.items_table.setCellWidget(row, 1, qty_cb)
+            qty_widget.setCurrentIndex(ML_OPTIONS.index(default_ml))
+        qty_widget.currentIndexChanged.connect(lambda _, r=row: self.update_price_for_row(r))
+        self.items_table.setCellWidget(row, 1, qty_widget)
 
-        # Cena za ml
+        # Cena za ml - tylko do odczytu
         price_item = QTableWidgetItem("0.00")
         price_item.setFlags(price_item.flags() & ~Qt.ItemIsEditable)
         self.items_table.setItem(row, 2, price_item)
 
-        # Część zam.
+        # Część zamówienia - tylko do odczytu
         part_item = QTableWidgetItem("0.00")
         part_item.setFlags(part_item.flags() & ~Qt.ItemIsEditable)
         self.items_table.setItem(row, 3, part_item)
 
-        # Flaga gratis
+        # Flaga gratis (ukryta)
         flag_item = QTableWidgetItem("1" if is_gratis else "0")
         flag_item.setFlags(flag_item.flags() & ~Qt.ItemIsEditable)
         self.items_table.setItem(row, 4, flag_item)
 
+        # Checkbox flakon
+        flask_checkbox = QCheckBox()
+        flask_checkbox.setToolTip("Flakon — po zaznaczeniu ilość (ml) można wpisać ręcznie")
+        flask_checkbox.stateChanged.connect(lambda state, r=row: self.on_flask_checkbox_changed(r, state))
+        self.items_table.setCellWidget(row, 5, flask_checkbox)
+
         self.update_price_for_row(row)
 
-    def add_gratis_row(self):
-        names = [f"{p.brand} {p.name}" for p in self._perfume_cache]
-        idx, ok = QInputDialog.getItem(self, "Gratis", "Wybierz perfumy:", names, 0, False)
-        if ok:
-            p = self._perfume_cache[names.index(idx)]
-            self.add_item_row(perfume_obj=p, is_gratis=True, default_ml=5)
+    def on_flask_checkbox_changed(self, row, state):
+        qty_widget = self.items_table.cellWidget(row, 1)
+        if state == Qt.Checked:
+            # Zamieniamy na QLineEdit i automatycznie ustawiamy na pojemność perfum
+            current_qty = 0
+            if isinstance(qty_widget, QComboBox):
+                current_qty = qty_widget.currentData()
+            elif isinstance(qty_widget, QLineEdit):
+                try:
+                    current_qty = float(qty_widget.text())
+                except Exception:
+                    current_qty = 0
+            line_edit = QLineEdit()
+            line_edit.setValidator(QDoubleValidator(0.01, 10000.0, 2))
+            pid = self.items_table.cellWidget(row, 0).currentData()
+            perfume = next((p for p in self._perfume_cache if p.id == pid), None)
+            if perfume is not None:
+                line_edit.setText(str(perfume.to_decant or ''))
+            else:
+                line_edit.setText(str(current_qty))
+            line_edit.editingFinished.connect(lambda r=row: self.update_price_for_row(r))
+            self.items_table.setCellWidget(row, 1, line_edit)
+        else:
+            # Powrót do QComboBox z wartościami standardowymi
+            combo = QComboBox()
+            for ml in ML_OPTIONS:
+                combo.addItem(str(ml), ml)
+            # Próbujemy przywrócić bieżącą wartość, jeśli jest liczbową
+            try:
+                current_qty = 0
+                if isinstance(qty_widget, QLineEdit):
+                    current_qty = float(qty_widget.text())
+                elif isinstance(qty_widget, QComboBox):
+                    current_qty = qty_widget.currentData()
+                if current_qty in ML_OPTIONS:
+                    combo.setCurrentIndex(ML_OPTIONS.index(current_qty))
+            except Exception:
+                pass
+            combo.currentIndexChanged.connect(lambda _, r=row: self.update_price_for_row(r))
+            self.items_table.setCellWidget(row, 1, combo)
+
+        self.update_price_for_row(row)
 
     def update_price_for_row(self, row):
-        # Pobranie flagi gratis (zabezpieczenie przed None)
         flag_item = self.items_table.item(row, 4)
         is_gratis = (flag_item.text() == "1") if flag_item else False
 
@@ -179,13 +222,22 @@ class AddOrderDialog(QDialog):
         pid = combo.currentData() if combo else None
         perfume = next((p for p in self._perfume_cache if p.id == pid), None)
 
-        qty_cb = self.items_table.cellWidget(row, 1)
-        qty = qty_cb.currentData() or 0
+        qty_widget = self.items_table.cellWidget(row, 1)
+        if qty_widget is None:
+            qty = 0
+        elif isinstance(qty_widget, QComboBox):
+            qty = qty_widget.currentData() or 0
+        elif isinstance(qty_widget, QLineEdit):
+            try:
+                qty = float(qty_widget.text())
+            except ValueError:
+                qty = 0
+        else:
+            qty = 0
 
         price_ml = 0.0 if is_gratis or perfume is None else (perfume.price_per_ml or 0.0)
         partial = 0.0 if is_gratis else price_ml * qty
 
-        # Ustawienie ceny za ml
         price_item = self.items_table.item(row, 2)
         if price_item is None:
             price_item = QTableWidgetItem()
@@ -193,7 +245,6 @@ class AddOrderDialog(QDialog):
             self.items_table.setItem(row, 2, price_item)
         price_item.setText(f"{price_ml:.2f}")
 
-        # Ustawienie części zam.
         part_item = self.items_table.item(row, 3)
         if part_item is None:
             part_item = QTableWidgetItem()
@@ -219,20 +270,28 @@ class AddOrderDialog(QDialog):
         ship_key = self.shipping_combo.currentData()
         ship_cost = SHIPPING_OPTIONS.get(ship_key, 0.0)
         total += ship_cost + count_paid * ORDER_VIAL_COST
-
         self.total_label.setText(f"Suma do zapłaty: {total:.2f} zł")
+
+    def add_gratis_row(self):
+        names = [f"{p.brand} {p.name}" for p in self._perfume_cache]
+        idx, ok = QInputDialog.getItem(self, "Gratis", "Wybierz perfumy:", names, 0, False)
+        if ok:
+            p = self._perfume_cache[names.index(idx)]
+            self.add_item_row(perfume_obj=p, is_gratis=True, default_ml=5)
 
     def fill_with_order(self, order: Order):
         self.buyer_input.setText(order.buyer or "")
         idx = self.shipping_combo.findData(order.shipping and order.shipping in SHIPPING_OPTIONS and order.shipping)
         if idx >= 0:
             self.shipping_combo.setCurrentIndex(idx)
+
         self.cb_msg.setChecked(order.sent_message)
         self.cb_money.setChecked(order.received_money)
         self.cb_label.setChecked(order.generated_label)
         self.cb_package.setChecked(order.packed)
         self.cb_shipped.setChecked(order.sent)
         self.cb_confirm.setChecked(order.confirmation_obtained)
+
         if order.sale_date:
             self.sale_date_edit.setDate(QDate(order.sale_date.year, order.sale_date.month, order.sale_date.day))
 
@@ -240,7 +299,7 @@ class AddOrderDialog(QDialog):
         items = self.session.query(OrderItem).filter_by(order_id=order.id).all()
         for oi in items:
             p = next((x for x in self._perfume_cache if x.id == oi.perfume_id), None)
-            self.add_item_row(perfume_obj=p, is_gratis=(oi.price_per_ml == 0), default_ml=int(oi.quantity_ml))
+            self.add_item_row(perfume_obj=p, is_gratis=(oi.price_per_ml == 0), default_ml=int(round(oi.quantity_ml)))
 
     def save_order(self):
         if self.items_table.rowCount() == 0:
@@ -261,7 +320,6 @@ class AddOrderDialog(QDialog):
         order = self.order_to_edit or Order()
         if not self.order_to_edit:
             self.session.add(order)
-
         order.buyer = buyer
         ship_key = self.shipping_combo.currentData()
         order.shipping = SHIPPING_OPTIONS.get(ship_key, 0.0)
@@ -281,7 +339,16 @@ class AddOrderDialog(QDialog):
                 flag_item = self.items_table.item(r, 4)
                 is_gratis = (flag_item.text() == "1") if flag_item else False
                 pid = self.items_table.cellWidget(r, 0).currentData()
-                qty = self.items_table.cellWidget(r, 1).currentData() or 0
+                qty_widget = self.items_table.cellWidget(r, 1)
+                if isinstance(qty_widget, QComboBox):
+                    qty = qty_widget.currentData() or 0
+                elif isinstance(qty_widget, QLineEdit):
+                    try:
+                        qty = float(qty_widget.text())
+                    except ValueError:
+                        qty = 0
+                else:
+                    qty = 0
                 price = 0.0 if is_gratis else float(self.items_table.item(r, 2).text().replace(",", "."))
                 part = 0.0 if is_gratis else float(self.items_table.item(r, 3).text().replace(",", "."))
                 oi = OrderItem(
@@ -302,16 +369,27 @@ class AddOrderDialog(QDialog):
     def generate_message_popup(self):
         def fmt(v):
             return f"{int(v)}" if float(v).is_integer() else f"{v:.2f}".replace(".", ",")
+
         perfume_map = {p.id: p for p in self._perfume_cache}
         items_summary = []
         count_paid = 0
         total = 0.0
+
         for r in range(self.items_table.rowCount()):
             flag_item = self.items_table.item(r, 4)
             if flag_item and flag_item.text() == "1":
                 continue
             pid = self.items_table.cellWidget(r, 0).currentData()
-            qty = self.items_table.cellWidget(r, 1).currentData()
+            qty_widget = self.items_table.cellWidget(r, 1)
+            if isinstance(qty_widget, QComboBox):
+                qty = qty_widget.currentData()
+            elif isinstance(qty_widget, QLineEdit):
+                try:
+                    qty = float(qty_widget.text())
+                except ValueError:
+                    qty = 0
+            else:
+                qty = 0
             price = float(self.items_table.item(r, 2).text().replace(",", "."))
             part = float(self.items_table.item(r, 3).text().replace(",", "."))
             p = perfume_map.get(pid)
@@ -320,15 +398,18 @@ class AddOrderDialog(QDialog):
             items_summary.append(f"{p.brand} {p.name} -> {fmt(qty)} x {fmt(price)} = {fmt(part)}zł")
             total += part
             count_paid += 1
+
         vial_sum = count_paid * ORDER_VIAL_COST
         total += vial_sum
         delivery_key = self.shipping_combo.currentData()
         delivery_cost = SHIPPING_OPTIONS.get(delivery_key, 0.0)
         total_with = total + delivery_cost
+
         msg = "Podsumowanie:\n" + "\n".join(items_summary)
         if count_paid:
             msg += f"\nDekanty -> {count_paid} x {ORDER_VIAL_COST:.0f} zł = {fmt(vial_sum)}zł"
         if delivery_cost:
             msg += f"\nZa dostawę {delivery_key} doliczamy {int(delivery_cost)}zł"
         msg += f"\nRazem: {fmt(total_with)}zł\n\nBLIK: 694604172\nJeśli potrzeba, mogę podać numer konta bankowego"
+
         MessagePopup(msg, parent=self, checkbox_to_mark=self.cb_msg).exec_()
