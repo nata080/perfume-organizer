@@ -2,7 +2,7 @@
 
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
-    QTableWidgetItem, QMessageBox, QFileDialog
+    QTableWidgetItem, QMessageBox, QFileDialog, QComboBox, QLineEdit, QLabel, QHeaderView
 )
 from PyQt5.QtGui import QColor, QFont
 from reportlab.lib.pagesizes import A4, landscape
@@ -33,19 +33,47 @@ class PerfumesView(QWidget):
     def __init__(self):
         super().__init__()
         self.session = Session()
+
         base_font = QFont()
         base_font.setPointSize(9)
         self.setFont(base_font)
+
+        self.filter_status = "Wszystkie"  # domyślny filtr statusu
+        self.search_notes = ""  # domyślna wyszukiwarka nut
+
         layout = QVBoxLayout(self)
+
+        # GÓRA – przyciski akcji
         top_row = QHBoxLayout()
         self.add_button = QPushButton("Dodaj")
         self.add_button.clicked.connect(self.add_perfume)
         top_row.addWidget(self.add_button)
+
         self.pdf_button = QPushButton("Zapisz do PDF")
         self.pdf_button.clicked.connect(self.save_to_pdf)
         top_row.addWidget(self.pdf_button)
+
         top_row.addStretch()
         layout.addLayout(top_row)
+
+        # FILTRY I WYSZUKIWARKA
+        filter_row = QHBoxLayout()
+        self.status_filter_combo = QComboBox()
+        self.status_filter_combo.addItems(["Wszystkie", "Dostępny", "Niedostępny"])
+        self.status_filter_combo.currentTextChanged.connect(self.on_filter_change)
+        filter_row.addWidget(QLabel("Status:"))
+        filter_row.addWidget(self.status_filter_combo)
+
+        self.notes_search_edit = QLineEdit()
+        self.notes_search_edit.setPlaceholderText("Szukaj po nutach (np. wanilia, cytrusy)…")
+        self.notes_search_edit.textChanged.connect(self.on_filter_change)
+        filter_row.addWidget(QLabel("Nuty:"))
+        filter_row.addWidget(self.notes_search_edit)
+
+        filter_row.addStretch()
+        layout.addLayout(filter_row)
+
+        # TABELA
         self.table = QTableWidget()
         self.table.setColumnCount(13)
         headers = [
@@ -54,27 +82,61 @@ class PerfumesView(QWidget):
             "Opłaty", "Bilans", "Edytuj", "Usuń"
         ]
         self.table.setHorizontalHeaderLabels(headers)
+        self.table.setSortingEnabled(True)  # sortowanie
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.table.setAlternatingRowColors(True)
+        self.table.setWordWrap(True)
+
         layout.addWidget(self.table)
         self.setLayout(layout)
+
+        self.load_perfumes()
+
+    def on_filter_change(self, *args):
+        self.filter_status = self.status_filter_combo.currentText()
+        self.search_notes = self.notes_search_edit.text()
         self.load_perfumes()
 
     def load_perfumes(self):
-        perfumes = self.session.query(Perfume).all()
+        query = self.session.query(Perfume)
+
+        # FILTR statusu
+        if self.filter_status == "Dostępny":
+            query = query.filter(Perfume.status == "Dostępny")
+        elif self.filter_status == "Niedostępny":
+            query = query.filter(Perfume.status == "Niedostępny")
+
+        perfumes = query.all()
+
+        # FILTR nut zapachowych
+        if self.search_notes.strip():
+            keywords = [s.strip().lower() for s in self.search_notes.split(",") if s.strip()]
+            def nuty_match(p):
+                notes_strs = [p.top_notes or "", p.heart_notes or "", p.base_notes or ""]
+                whole = " ".join(notes_strs).lower()
+                return all(k in whole for k in keywords)
+            perfumes = list(filter(nuty_match, perfumes))
+
         self.table.setRowCount(len(perfumes))
+
         for row, p in enumerate(perfumes):
             used_ml = sum(
-                oi.quantity_ml for oi in self.session.query(OrderItem).filter_by(perfume_id=p.id)
+                oi.quantity_ml
+                for oi in self.session.query(OrderItem).filter_by(perfume_id=p.id)
             )
             remaining = max((p.to_decant or 0) - used_ml, 0)
-            orders_count = self.session.query(OrderItem)\
-                .filter_by(perfume_id=p.id)\
-                .filter(OrderItem.price_per_ml > 0)\
+            orders_count = self.session.query(OrderItem) \
+                .filter_by(perfume_id=p.id) \
+                .filter(OrderItem.price_per_ml > 0) \
                 .count()
+
             sales_sum = sum(
                 oi.quantity_ml * oi.price_per_ml
                 for oi in self.session.query(OrderItem).filter_by(perfume_id=p.id)
                 if oi.price_per_ml > 0
             ) + orders_count * DECANT_COST
+
             extra_costs = orders_count * 2 + orders_count
             balance = sales_sum - (p.purchase_price or 0) - extra_costs
 
@@ -90,11 +152,12 @@ class PerfumesView(QWidget):
             self.table.setItem(row, 2, QTableWidgetItem(p.name or ""))
             self.table.setItem(row, 3, QTableWidgetItem(f"{p.to_decant or 0:.2f}"))
 
-            # Pozostało (w kolumnie 4): bez przecinków jeśli int
+            # Pozostało
             if float(remaining).is_integer():
                 remaining_str = str(int(remaining))
             else:
                 remaining_str = f"{remaining:.2f}"
+
             rem_col = "green" if remaining > 50 else "gold" if remaining > 20 else "red"
             self.table.setItem(row, 4, colored_item(remaining_str, rem_col))
 
@@ -103,14 +166,24 @@ class PerfumesView(QWidget):
             self.table.setItem(row, 7, QTableWidgetItem(f"{sales_sum:.2f}"))
             self.table.setItem(row, 8, QTableWidgetItem(f"{p.purchase_price or 0:.2f}"))
             self.table.setItem(row, 9, QTableWidgetItem(str(extra_costs)))
+
             bal_col = "green" if balance > 0 else "red" if balance < 0 else None
             self.table.setItem(row, 10, colored_item(f"{balance:.2f}", bal_col))
+
             edit_btn = QPushButton("Edytuj")
             edit_btn.clicked.connect(lambda _, pid=p.id: self.edit_perfume(pid))
             self.table.setCellWidget(row, 11, edit_btn)
+
             del_btn = QPushButton("Usuń")
             del_btn.clicked.connect(lambda _, pid=p.id: self.delete_perfume(pid))
             self.table.setCellWidget(row, 12, del_btn)
+
+            # Jeśli perfumy to rozbiórka, podbarwiamy wiersz
+            if getattr(p, "is_split", False):
+                for col in range(self.table.columnCount()):
+                    item = self.table.item(row, col)
+                    if item:
+                        item.setBackground(QColor(210, 234, 255))  # bardzo jasny błękit (RGB)
 
     def add_perfume(self):
         from ui.add_perfume_dialog import AddPerfumeDialog
@@ -165,24 +238,18 @@ class PerfumesView(QWidget):
                         break
             except Exception:
                 pass
-        pdfmetrics.registerFont(TTFont('DejaVuSans', font_path))
 
+        pdfmetrics.registerFont(TTFont('DejaVuSans', font_path))
         today = datetime.now()
         filename = f"lista_perfum_{today.year}_{today.month:02d}_{today.day:02d}.pdf"
+
         path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Zapisz listę jako PDF",
-            filename,
-            "PDF Files (*.pdf)"
+            self, "Zapisz listę jako PDF", filename, "PDF Files (*.pdf)"
         )
         if not path:
             return
 
-        perfumes = (
-            self.session.query(Perfume)
-            .order_by(Perfume.brand.asc(), Perfume.name.asc())
-            .all()
-        )
+        perfumes = self.session.query(Perfume).order_by(Perfume.brand.asc(), Perfume.name.asc()).all()
 
         headers = [col[0] for col in EXPORT_COLUMNS]
         styles = getSampleStyleSheet()
@@ -195,15 +262,17 @@ class PerfumesView(QWidget):
         )
 
         data = [headers]
+
         for p in perfumes:
             brand = p.brand or ""
             name = p.name or ""
             price = f"{p.price_per_ml or 0:.2f}"
+
             used_ml = sum(
-                oi.quantity_ml
-                for oi in self.session.query(OrderItem).filter_by(perfume_id=p.id)
+                oi.quantity_ml for oi in self.session.query(OrderItem).filter_by(perfume_id=p.id)
             )
             remaining = max((p.to_decant or 0) - used_ml, 0)
+
             if float(remaining).is_integer():
                 remaining_str = str(int(remaining))
             else:
@@ -213,7 +282,8 @@ class PerfumesView(QWidget):
             display_text = f"fragrantica - {brand} - {name}"
             if url.strip().lower().startswith(("http://", "https://")):
                 link_cell = Paragraph(
-                    f'<link href="{escape(url)}">{escape(display_text)}</link>', cell_style
+                    f'<link href="{escape(url)}">{escape(display_text)}</link>',
+                    cell_style
                 )
             else:
                 link_cell = Paragraph(escape(display_text), cell_style)
@@ -228,7 +298,6 @@ class PerfumesView(QWidget):
             data.append(row)
 
         col_widths = [90, 170, 85, 90, 210]  # kolumna „Pozostało” poszerzona
-
         table_style = TableStyle([
             ('FONTNAME', (0, 0), (-1, -1), 'DejaVuSans'),
             ('FONTSIZE', (0, 0), (-1, -1), 10),
@@ -251,10 +320,12 @@ class PerfumesView(QWidget):
             topMargin=20,
             bottomMargin=20,
         )
+
         elements = [
             Paragraph("Lista perfum", styles["Title"]),
             Spacer(1, 12),
             Table(data, colWidths=col_widths, repeatRows=1, style=table_style)
         ]
+
         doc.build(elements)
         QMessageBox.information(self, "Eksport zakończony", f"PDF zapisany do:\n{path}")

@@ -32,6 +32,7 @@ class Perfume(Base):
 
     # Image data (can store path or base64)
     image_data = Column(String)
+    is_split = Column(Boolean, default=False)  # True jeśli perfuma to ROZBIÓRKA
 
     # Pola automatyczne
     order_count = Column(Integer, default=0)    # liczba zamówień

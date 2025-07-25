@@ -14,7 +14,6 @@ class AddPerfumeDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Dodaj nowe perfumy")
         self.resize(900, 500)
-
         base_font = QFont()
         base_font.setPointSize(9)
         self.setFont(base_font)
@@ -99,7 +98,7 @@ class AddPerfumeDialog(QDialog):
         gender_row.addWidget(self.cb_unisex)
         left_col.addLayout(gender_row)
 
-        # Checkboxy pór roku pod płcią
+        # Checkboxy pór roku
         season_row = QHBoxLayout()
         season_row.addWidget(QLabel("Pora roku:"))
         self.cb_spring = QCheckBox("Wiosna")
@@ -112,6 +111,10 @@ class AddPerfumeDialog(QDialog):
         season_row.addWidget(self.cb_winter)
         left_col.addLayout(season_row)
 
+        # Checkbox ROZBIÓRKA
+        self.cb_split = QCheckBox("ROZBIÓRKA")
+        left_col.addWidget(self.cb_split)
+
         # Obraz
         img_row = QHBoxLayout()
         self.img_label = QLabel()
@@ -121,40 +124,50 @@ class AddPerfumeDialog(QDialog):
         img_row.addWidget(self.img_label)
         load_img_btn = QPushButton("Wczytaj obraz")
         load_img_btn.clicked.connect(self.choose_image)
-        load_img_btn.setFocusPolicy(Qt.NoFocus)
+        load_img_btn.setFocusPolicy(Qt.NoFocus)  # brak focusu na przycisku
         img_row.addWidget(load_img_btn)
         left_col.addLayout(img_row)
+
         left_col.addStretch()
 
         # PRAWA KOLUMNA – nuty zapachowe
         right_col = QVBoxLayout()
         content_layout.addLayout(right_col, 1)
-        self.top_notes_list   = self._build_notes_group(right_col, "Nuty głowy")
+
+        self.top_notes_list = self._build_notes_group(right_col, "Nuty głowy")
         self.heart_notes_list = self._build_notes_group(right_col, "Nuty serca")
-        self.base_notes_list  = self._build_notes_group(right_col, "Nuty bazy")
+        self.base_notes_list = self._build_notes_group(right_col, "Nuty bazy")
+
         right_col.addStretch()
 
         # Przyciski akcji
         btn_row = QHBoxLayout()
-        save_btn   = QPushButton("Dodaj perfumy")
+        save_btn = QPushButton("Dodaj perfumy")
+        save_btn.setFocusPolicy(Qt.NoFocus)  # zablokuj focus na przycisku
         save_btn.clicked.connect(self._validate_and_accept)
+
         cancel_btn = QPushButton("Anuluj")
+        cancel_btn.setFocusPolicy(Qt.NoFocus)
         cancel_btn.clicked.connect(self.reject)
+
         btn_row.addStretch()
         btn_row.addWidget(save_btn)
         btn_row.addWidget(cancel_btn)
         main_layout.addLayout(btn_row)
 
+        # Ustaw focus na polu Nazwa po otwarciu dialogu
+        self.name_input.setFocus()
+
     def _build_notes_group(self, parent, title):
-        parent.addWidget(QLabel(f"<b>{title}</b>"))
+        parent.addWidget(QLabel(f"{title}"))
         row = QHBoxLayout()
         note_input = QLineEdit()
         note_input.setPlaceholderText("Dodaj nutę…")
         add_btn = QPushButton("+")
+        add_btn.setFocusPolicy(Qt.NoFocus)  # brak focusu na przycisku "+"
         row.addWidget(note_input)
         row.addWidget(add_btn)
         parent.addLayout(row)
-
         notes_list = QListWidget()
         parent.addWidget(notes_list)
 
@@ -164,8 +177,8 @@ class AddPerfumeDialog(QDialog):
                 notes_list.addItem(QListWidgetItem(text))
                 note_input.clear()
 
+        # Enter dodaje nutę bez przełączania focusu
         add_btn.clicked.connect(add_note)
-        # tylko jedno połączenie: Enter → add_note
         note_input.returnPressed.connect(add_note)
 
         return notes_list
@@ -174,6 +187,7 @@ class AddPerfumeDialog(QDialog):
         if not self.name_input.text().strip():
             QMessageBox.warning(self, "Błąd", "Nazwa perfum jest wymagana.")
             return
+        # dodatkowe walidacje można dodać tutaj
         self.accept()
 
     def choose_image(self):
@@ -198,21 +212,22 @@ class AddPerfumeDialog(QDialog):
 
         return {
             "fragrantica_url": self.link_input.text().strip(),
-            "status":          self.status_combo.currentText(),
-            "brand":           self.brand_input.text().strip(),
-            "name":            self.name_input.text().strip(),
-            "to_decant":       to_decant,
-            "price_per_ml":    float(self.price_ml_input.value()),
-            "purchase_price":  float(self.purchase_price_input.value()),
-            "is_feminine":     self.cb_feminine.isChecked(),
-            "is_masculine":    self.cb_masculine.isChecked(),
-            "is_unisex":       self.cb_unisex.isChecked(),
+            "status": self.status_combo.currentText(),
+            "brand": self.brand_input.text().strip(),
+            "name": self.name_input.text().strip(),
+            "to_decant": to_decant,
+            "price_per_ml": float(self.price_ml_input.value()),
+            "purchase_price": float(self.purchase_price_input.value()),
+            "is_feminine": self.cb_feminine.isChecked(),
+            "is_masculine": self.cb_masculine.isChecked(),
+            "is_unisex": self.cb_unisex.isChecked(),
             "season_spring": self.cb_spring.isChecked(),
             "season_summer": self.cb_summer.isChecked(),
             "season_autumn": self.cb_autumn.isChecked(),
             "season_winter": self.cb_winter.isChecked(),
-            "top_notes":       list_to_str(self.top_notes_list),
-            "heart_notes":     list_to_str(self.heart_notes_list),
-            "base_notes":      list_to_str(self.base_notes_list),
-            "image_data":      getattr(self, "image_data", "")
+            "is_split": self.cb_split.isChecked(),
+            "top_notes": list_to_str(self.top_notes_list),
+            "heart_notes": list_to_str(self.heart_notes_list),
+            "base_notes": list_to_str(self.base_notes_list),
+            "image_data": getattr(self, "image_data", ""),
         }
