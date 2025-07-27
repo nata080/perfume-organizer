@@ -14,7 +14,8 @@ from models.order import Order
 from ui.message_popup import MessagePopup
 
 ORDER_VIAL_COST = 4.0
-SHIPPING_OPTIONS = {"InPost": 12.0, "DPD": 10.0}
+# MOD: Dodano 'Własna etykieta' do sposobów wysyłki
+SHIPPING_OPTIONS = {"InPost": 12.0, "DPD": 10.0, "Własna etykieta": 0.0}
 ML_OPTIONS = [3, 5, 10, 15, 20, 30]
 
 class AddOrderDialog(QDialog):
@@ -111,15 +112,12 @@ class AddOrderDialog(QDialog):
         date_layout.addStretch()
         layout.addLayout(date_layout)
 
-        # Podłączenie zmiany stanu checkboxa "Potw. pobrania"
         self.cb_confirm.stateChanged.connect(self.on_confirm_checkbox_changed)
 
-        # Inicjalizacja daty potwierdzenia
         self.confirmation_date = None
         if order_to_edit and getattr(order_to_edit, "confirmation_date", None):
             self.confirmation_date = order_to_edit.confirmation_date
 
-        # Akcje (generuj wiadomość, zapisz, anuluj)
         action_layout = QHBoxLayout()
         msg_btn = QPushButton("Generuj wiadomość")
         msg_btn.clicked.connect(self.generate_message_popup)
@@ -133,22 +131,18 @@ class AddOrderDialog(QDialog):
         action_layout.addWidget(cancel_btn)
         layout.addLayout(action_layout)
 
-        # Cache perfum dostępnych
         self._perfume_cache = self.session.query(Perfume).filter(Perfume.status == "Dostępny").all()
         self.items_table.cellChanged.connect(lambda r, c: self.update_price_for_row(r))
 
-        # Inicjalizacja wierszy
         if self.order_to_edit:
             self.fill_with_order(self.order_to_edit)
         else:
             self.add_item_row(default_ml=5)
 
-    # Dodanie pozycji zamówienia (z przyciskiem Usuń)
     def add_item_row(self, perfume_obj=None, is_gratis=False, default_ml=5):
         from functools import partial
         row = self.items_table.rowCount()
         self.items_table.insertRow(row)
-        # Perfumy - QComboBox
         combo = QComboBox()
         combo.setFont(self.font())
         for p in self._perfume_cache:
@@ -158,7 +152,6 @@ class AddOrderDialog(QDialog):
             combo.setCurrentIndex(idx)
         combo.currentIndexChanged.connect(lambda _, r=row: self.update_price_for_row(r))
         self.items_table.setCellWidget(row, 0, combo)
-        # Ilość (ml) - QComboBox domyślnie
         qty_widget = QComboBox()
         for ml in ML_OPTIONS:
             qty_widget.addItem(str(ml), ml)
@@ -166,19 +159,15 @@ class AddOrderDialog(QDialog):
             qty_widget.setCurrentIndex(ML_OPTIONS.index(default_ml))
         qty_widget.currentIndexChanged.connect(lambda _, r=row: self.update_price_for_row(r))
         self.items_table.setCellWidget(row, 1, qty_widget)
-        # Cena za ml - tylko do odczytu
         price_item = QTableWidgetItem("0.00")
         price_item.setFlags(price_item.flags() & ~Qt.ItemIsEditable)
         self.items_table.setItem(row, 2, price_item)
-        # Część zamówienia - tylko do odczytu
         part_item = QTableWidgetItem("0.00")
         part_item.setFlags(part_item.flags() & ~Qt.ItemIsEditable)
         self.items_table.setItem(row, 3, part_item)
-        # Flaga gratis (ukryta)
         flag_item = QTableWidgetItem("1" if is_gratis else "0")
         flag_item.setFlags(flag_item.flags() & ~Qt.ItemIsEditable)
         self.items_table.setItem(row, 4, flag_item)
-        # Checkbox flakon
         flask_checkbox = QCheckBox()
         flask_checkbox.setToolTip("Flakon — po zaznaczeniu ilość (ml) można wpisać ręcznie")
         flask_checkbox.stateChanged.connect(lambda state, r=row: self.on_flask_checkbox_changed(r, state))
@@ -292,7 +281,9 @@ class AddOrderDialog(QDialog):
             total += part
             count_paid += 1
         ship_key = self.shipping_combo.currentData()
-        ship_cost = SHIPPING_OPTIONS.get(ship_key, 0.0)
+
+        # MOD: Jeśli wybrano 'Własna etykieta', koszt = 0
+        ship_cost = 0.0 if ship_key == "Własna etykieta" else SHIPPING_OPTIONS.get(ship_key, 0.0)
         total += ship_cost + count_paid * ORDER_VIAL_COST
         self.total_label.setText(f"Suma do zapłaty: {total:.2f} zł")
 
@@ -345,7 +336,8 @@ class AddOrderDialog(QDialog):
         order.buyer = buyer
         order.notes = self.notes_input.toPlainText().strip()
         ship_key = self.shipping_combo.currentData()
-        order.shipping = SHIPPING_OPTIONS.get(ship_key, 0.0)
+        # MOD: Dla 'Własna etykieta' wymuś koszt 0.0
+        order.shipping = 0.0 if ship_key == "Własna etykieta" else SHIPPING_OPTIONS.get(ship_key, 0.0)
         order.total = float(self.total_label.text().split(":")[1].split()[0].replace(",", "."))
         order.sent_message = self.cb_msg.isChecked()
         order.received_money = self.cb_money.isChecked()
@@ -427,12 +419,15 @@ class AddOrderDialog(QDialog):
         vial_sum = count_paid * ORDER_VIAL_COST
         total += vial_sum
         delivery_key = self.shipping_combo.currentData()
-        delivery_cost = SHIPPING_OPTIONS.get(delivery_key, 0.0)
+        # MOD: Sprawdź, czy wybrano 'Własna etykieta'
+        is_wlasna_etykieta = delivery_key == "Własna etykieta"
+        delivery_cost = 0.0 if is_wlasna_etykieta else SHIPPING_OPTIONS.get(delivery_key, 0.0)
         total_with = total + delivery_cost
         msg = "Podsumowanie:\n" + "\n".join(items_summary)
         if count_paid:
             msg += f"\nDekanty -> {count_paid} x {ORDER_VIAL_COST:.0f} zł = {fmt(vial_sum)}zł"
-        if delivery_cost:
+        # MOD: informacja o wysyłce tylko jeśli to nie 'Własna etykieta'
+        if not is_wlasna_etykieta and delivery_cost:
             msg += f"\nZa dostawę {delivery_key} doliczamy {int(delivery_cost)}zł"
         msg += f"\nRazem: {fmt(total_with)}zł\n\n"
         msg += "BLIK: 694604172\nJeśli potrzeba, mogę podać numer konta bankowego"
