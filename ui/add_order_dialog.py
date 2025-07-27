@@ -1,10 +1,12 @@
 from datetime import date
+
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QTableWidget, QTableWidgetItem,
     QComboBox, QPushButton, QCheckBox, QHeaderView, QDateEdit, QMessageBox, QInputDialog, QTextEdit
 )
 from PyQt5.QtGui import QFont, QDoubleValidator
 from PyQt5.QtCore import QDate, Qt
+
 from models.database import Session
 from models.perfume import Perfume
 from models.order_item import OrderItem
@@ -46,10 +48,10 @@ class AddOrderDialog(QDialog):
         notes_row.addWidget(self.notes_input)
         layout.addLayout(notes_row)
 
-        # Tabela pozycji zamówienia
-        self.items_table = QTableWidget(0, 6)  # dodatkowa kolumna Flakon
+        # Tabela pozycji zamówienia (7 kolumn: 6 + "Usuń")
+        self.items_table = QTableWidget(0, 7)
         self.items_table.setHorizontalHeaderLabels(
-            ["Perfumy", "Ilość (ml)", "Cena za ml", "Część zam.", "gratis", "Flakon"]
+            ["Perfumy", "Ilość (ml)", "Cena za ml", "Część zam.", "gratis", "Flakon", "Usuń"]
         )
         self.items_table.setColumnHidden(4, True)  # ukryte 'gratis'
         self.items_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
@@ -141,10 +143,11 @@ class AddOrderDialog(QDialog):
         else:
             self.add_item_row(default_ml=5)
 
+    # Dodanie pozycji zamówienia (z przyciskiem Usuń)
     def add_item_row(self, perfume_obj=None, is_gratis=False, default_ml=5):
+        from functools import partial
         row = self.items_table.rowCount()
         self.items_table.insertRow(row)
-
         # Perfumy - QComboBox
         combo = QComboBox()
         combo.setFont(self.font())
@@ -155,7 +158,6 @@ class AddOrderDialog(QDialog):
             combo.setCurrentIndex(idx)
         combo.currentIndexChanged.connect(lambda _, r=row: self.update_price_for_row(r))
         self.items_table.setCellWidget(row, 0, combo)
-
         # Ilość (ml) - QComboBox domyślnie
         qty_widget = QComboBox()
         for ml in ML_OPTIONS:
@@ -164,29 +166,43 @@ class AddOrderDialog(QDialog):
             qty_widget.setCurrentIndex(ML_OPTIONS.index(default_ml))
         qty_widget.currentIndexChanged.connect(lambda _, r=row: self.update_price_for_row(r))
         self.items_table.setCellWidget(row, 1, qty_widget)
-
         # Cena za ml - tylko do odczytu
         price_item = QTableWidgetItem("0.00")
         price_item.setFlags(price_item.flags() & ~Qt.ItemIsEditable)
         self.items_table.setItem(row, 2, price_item)
-
         # Część zamówienia - tylko do odczytu
         part_item = QTableWidgetItem("0.00")
         part_item.setFlags(part_item.flags() & ~Qt.ItemIsEditable)
         self.items_table.setItem(row, 3, part_item)
-
         # Flaga gratis (ukryta)
         flag_item = QTableWidgetItem("1" if is_gratis else "0")
         flag_item.setFlags(flag_item.flags() & ~Qt.ItemIsEditable)
         self.items_table.setItem(row, 4, flag_item)
-
         # Checkbox flakon
         flask_checkbox = QCheckBox()
         flask_checkbox.setToolTip("Flakon — po zaznaczeniu ilość (ml) można wpisać ręcznie")
         flask_checkbox.stateChanged.connect(lambda state, r=row: self.on_flask_checkbox_changed(r, state))
         self.items_table.setCellWidget(row, 5, flask_checkbox)
-
+        # Przycisk Usuń
+        del_btn = QPushButton("Usuń")
+        del_btn.setToolTip("Usuń tę pozycję zamówienia")
+        del_btn.clicked.connect(partial(self.delete_item_row, row))
+        self.items_table.setCellWidget(row, 6, del_btn)
         self.update_price_for_row(row)
+
+    def delete_item_row(self, row):
+        self.items_table.removeRow(row)
+        # Przeindeksuj przyciski Usuń
+        for r in range(self.items_table.rowCount()):
+            widget = self.items_table.cellWidget(r, 6)
+            if isinstance(widget, QPushButton):
+                try:
+                    widget.clicked.disconnect()
+                except Exception:
+                    pass
+                from functools import partial
+                widget.clicked.connect(partial(self.delete_item_row, r))
+        self.recalculate_total()
 
     def on_flask_checkbox_changed(self, row, state):
         qty_widget = self.items_table.cellWidget(row, 1)
@@ -301,7 +317,6 @@ class AddOrderDialog(QDialog):
         self.cb_confirm.setChecked(order.confirmation_obtained)
         if order.sale_date:
             self.sale_date_edit.setDate(QDate(order.sale_date.year, order.sale_date.month, order.sale_date.day))
-        # Ustawienie daty potwierdzenia
         self.confirmation_date = order.confirmation_date
         self.items_table.setRowCount(0)
         items = self.session.query(OrderItem).filter_by(order_id=order.id).all()
@@ -313,7 +328,6 @@ class AddOrderDialog(QDialog):
         if self.items_table.rowCount() == 0:
             QMessageBox.warning(self, "Błąd", "Dodaj przynajmniej jedną pozycję!")
             return
-
         if not any(
             float(self.items_table.item(r, 2).text()) > 0
             for r in range(self.items_table.rowCount())
@@ -321,16 +335,13 @@ class AddOrderDialog(QDialog):
         ):
             QMessageBox.warning(self, "Błąd", "Przynajmniej jedna pozycja musi być płatna!")
             return
-
         buyer = self.buyer_input.text().strip()
         if not buyer:
             QMessageBox.warning(self, "Błąd", "Wprowadź kupującego!")
             return
-
         order = self.order_to_edit or Order()
         if not self.order_to_edit:
             self.session.add(order)
-
         order.buyer = buyer
         order.notes = self.notes_input.toPlainText().strip()
         ship_key = self.shipping_combo.currentData()
@@ -343,14 +354,12 @@ class AddOrderDialog(QDialog):
         order.sent = self.cb_shipped.isChecked()
         order.confirmation_obtained = self.cb_confirm.isChecked()
         order.sale_date = self.sale_date_edit.date().toPyDate() if self.cb_money.isChecked() else None
-
         if self.cb_confirm.isChecked():
             if not self.confirmation_date:
                 self.confirmation_date = date.today()
         else:
             self.confirmation_date = None
         order.confirmation_date = self.confirmation_date
-
         try:
             if self.order_to_edit:
                 self.session.query(OrderItem).filter_by(order_id=order.id).delete()
@@ -388,7 +397,6 @@ class AddOrderDialog(QDialog):
     def generate_message_popup(self):
         def fmt(v):
             return f"{int(v)}" if float(v).is_integer() else f"{v:.2f}".replace(".", ",")
-
         perfume_map = {p.id: p for p in self._perfume_cache}
         items_summary = []
         count_paid = 0
@@ -416,22 +424,18 @@ class AddOrderDialog(QDialog):
             items_summary.append(f"{p.brand} {p.name} -> {fmt(qty)} x {fmt(price)} = {fmt(part)}zł")
             total += part
             count_paid += 1
-
         vial_sum = count_paid * ORDER_VIAL_COST
         total += vial_sum
         delivery_key = self.shipping_combo.currentData()
         delivery_cost = SHIPPING_OPTIONS.get(delivery_key, 0.0)
         total_with = total + delivery_cost
-
         msg = "Podsumowanie:\n" + "\n".join(items_summary)
         if count_paid:
             msg += f"\nDekanty -> {count_paid} x {ORDER_VIAL_COST:.0f} zł = {fmt(vial_sum)}zł"
         if delivery_cost:
             msg += f"\nZa dostawę {delivery_key} doliczamy {int(delivery_cost)}zł"
         msg += f"\nRazem: {fmt(total_with)}zł\n\n"
-        # Usunięto uwagi z wiadomości zgodnie z prośbą
         msg += "BLIK: 694604172\nJeśli potrzeba, mogę podać numer konta bankowego"
-
         popup = MessagePopup(msg, parent=self, checkbox_to_mark=self.cb_msg)
         popup.exec_()
 
