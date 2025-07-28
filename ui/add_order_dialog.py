@@ -168,10 +168,14 @@ class AddOrderDialog(QDialog):
         flag_item = QTableWidgetItem("1" if is_gratis else "0")
         flag_item.setFlags(flag_item.flags() & ~Qt.ItemIsEditable)
         self.items_table.setItem(row, 4, flag_item)
-        flask_checkbox = QCheckBox()
-        flask_checkbox.setToolTip("Flakon — po zaznaczeniu ilość (ml) można wpisać ręcznie")
-        flask_checkbox.stateChanged.connect(lambda state, r=row: self.on_flask_checkbox_changed(r, state))
-        self.items_table.setCellWidget(row, 5, flask_checkbox)
+        if not is_gratis:
+            flask_checkbox = QCheckBox()
+            flask_checkbox.setToolTip("Flakon — po zaznaczeniu ilość (ml) można wpisać ręcznie")
+            flask_checkbox.stateChanged.connect(lambda state, r=row: self.on_flask_checkbox_changed(r, state))
+            self.items_table.setCellWidget(row, 5, flask_checkbox)
+        else:
+            empty_lbl = QLabel("")   # Pusta komórka dla gratisów, zachowuje spójność kolumn
+            self.items_table.setCellWidget(row, 5, empty_lbl)
         # Przycisk Usuń
         del_btn = QPushButton("Usuń")
         del_btn.setToolTip("Usuń tę pozycję zamówienia")
@@ -292,7 +296,7 @@ class AddOrderDialog(QDialog):
         idx, ok = QInputDialog.getItem(self, "Gratis", "Wybierz perfumy:", names, 0, False)
         if ok:
             p = self._perfume_cache[names.index(idx)]
-            self.add_item_row(perfume_obj=p, is_gratis=True, default_ml=5)
+            self.add_item_row(perfume_obj=p, is_gratis=True, default_ml=3)
 
     def fill_with_order(self, order: Order):
         self.buyer_input.setText(order.buyer or "")
