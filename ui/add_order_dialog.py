@@ -1,11 +1,13 @@
 from datetime import date
+from functools import partial
 
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QTableWidget, QTableWidgetItem,
-    QComboBox, QPushButton, QCheckBox, QHeaderView, QDateEdit, QMessageBox, QInputDialog, QTextEdit
+    QComboBox, QPushButton, QCheckBox, QHeaderView, QDateEdit, QMessageBox, QInputDialog,
+    QTextEdit, QWidget
 )
 from PyQt5.QtGui import QFont, QDoubleValidator
-from PyQt5.QtCore import QDate, Qt
+from PyQt5.QtCore import QDate, Qt, QCoreApplication
 
 from models.database import Session
 from models.perfume import Perfume
@@ -14,7 +16,6 @@ from models.order import Order
 from ui.message_popup import MessagePopup
 
 ORDER_VIAL_COST = 4.0
-# MOD: Dodano 'Własna etykieta' do sposobów wysyłki
 SHIPPING_OPTIONS = {"InPost": 12.0, "DPD": 10.0, "Własna etykieta": 0.0}
 ML_OPTIONS = [3, 5, 10, 15, 20, 30]
 
@@ -25,13 +26,12 @@ class AddOrderDialog(QDialog):
         self.order_to_edit = order_to_edit
         self.setWindowTitle("Nowe zamówienie" if not order_to_edit else "Edytuj zamówienie")
         self.resize(900, 600)
+
         base_font = QFont()
         base_font.setPointSize(9)
         self.setFont(base_font)
 
         layout = QVBoxLayout(self)
-
-        # Kupujący
         form = QHBoxLayout()
         form.addWidget(QLabel("Kupujący:"))
         self.buyer_input = QLineEdit()
@@ -39,7 +39,6 @@ class AddOrderDialog(QDialog):
         form.addWidget(self.buyer_input)
         layout.addLayout(form)
 
-        # Uwagi do zamówienia
         notes_row = QHBoxLayout()
         notes_label = QLabel("Uwagi do zamówienia:")
         self.notes_input = QTextEdit()
@@ -49,19 +48,18 @@ class AddOrderDialog(QDialog):
         notes_row.addWidget(self.notes_input)
         layout.addLayout(notes_row)
 
-        # Tabela pozycji zamówienia (7 kolumn: 6 + "Usuń")
-        self.items_table = QTableWidget(0, 7)
+        self.items_table = QTableWidget(0, 9)
         self.items_table.setHorizontalHeaderLabels(
-            ["Perfumy", "Ilość (ml)", "Cena za ml", "Część zam.", "gratis", "Flakon", "Usuń"]
+            ["Perfumy", "Ilość (ml)", "Cena za ml", "Część zam.", "gratis", "Flakon", "Rozbiórka", "Usuń", ""]
         )
-        self.items_table.setColumnHidden(4, True)  # ukryte 'gratis'
+        self.items_table.setColumnHidden(4, True)
+        self.items_table.setColumnHidden(8, True)
         self.items_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         layout.addWidget(self.items_table)
 
-        # Przyciski dodawania
         btns = QHBoxLayout()
         add_btn = QPushButton("Dodaj perfumy")
-        add_btn.clicked.connect(lambda: self.add_item_row(default_ml=5))
+        add_btn.clicked.connect(lambda: self.add_item_row())
         btns.addWidget(add_btn)
         gratis_btn = QPushButton("+ Gratis")
         gratis_btn.clicked.connect(self.add_gratis_row)
@@ -69,7 +67,6 @@ class AddOrderDialog(QDialog):
         btns.addStretch()
         layout.addLayout(btns)
 
-        # Wysyłka
         ship_layout = QHBoxLayout()
         ship_layout.addWidget(QLabel("Wysyłka:"))
         self.shipping_combo = QComboBox()
@@ -81,11 +78,9 @@ class AddOrderDialog(QDialog):
         ship_layout.addStretch()
         layout.addLayout(ship_layout)
 
-        # Suma do zapłaty
         self.total_label = QLabel("Suma do zapłaty: 0.00 zł")
         layout.addWidget(self.total_label)
 
-        # Statusy (checkboxy)
         cb_layout = QHBoxLayout()
         self.cb_msg = QCheckBox("Wiadomość")
         self.cb_money = QCheckBox("Pieniądz")
@@ -101,7 +96,6 @@ class AddOrderDialog(QDialog):
         cb_layout.addWidget(self.cb_confirm)
         layout.addLayout(cb_layout)
 
-        # Data sprzedaży (aktywna tylko gdy zaznaczony "Pieniądz")
         date_layout = QHBoxLayout()
         date_layout.addWidget(QLabel("Data sprzedaży:"))
         self.sale_date_edit = QDateEdit(QDate.currentDate())
@@ -113,7 +107,6 @@ class AddOrderDialog(QDialog):
         layout.addLayout(date_layout)
 
         self.cb_confirm.stateChanged.connect(self.on_confirm_checkbox_changed)
-
         self.confirmation_date = None
         if order_to_edit and getattr(order_to_edit, "confirmation_date", None):
             self.confirmation_date = order_to_edit.confirmation_date
@@ -140,9 +133,9 @@ class AddOrderDialog(QDialog):
             self.add_item_row(default_ml=5)
 
     def add_item_row(self, perfume_obj=None, is_gratis=False, default_ml=5):
-        from functools import partial
         row = self.items_table.rowCount()
         self.items_table.insertRow(row)
+
         combo = QComboBox()
         combo.setFont(self.font())
         for p in self._perfume_cache:
@@ -150,52 +143,96 @@ class AddOrderDialog(QDialog):
         if perfume_obj:
             idx = next((i for i, p in enumerate(self._perfume_cache) if p.id == perfume_obj.id), 0)
             combo.setCurrentIndex(idx)
-        combo.currentIndexChanged.connect(lambda _, r=row: self.update_price_for_row(r))
+        combo.currentIndexChanged.connect(partial(self.update_price_for_row, row))
         self.items_table.setCellWidget(row, 0, combo)
+
         qty_widget = QComboBox()
         for ml in ML_OPTIONS:
             qty_widget.addItem(str(ml), ml)
         if default_ml in ML_OPTIONS:
             qty_widget.setCurrentIndex(ML_OPTIONS.index(default_ml))
-        qty_widget.currentIndexChanged.connect(lambda _, r=row: self.update_price_for_row(r))
+        qty_widget.currentIndexChanged.connect(partial(self.update_price_for_row, row))
         self.items_table.setCellWidget(row, 1, qty_widget)
+
         price_item = QTableWidgetItem("0.00")
         price_item.setFlags(price_item.flags() & ~Qt.ItemIsEditable)
         self.items_table.setItem(row, 2, price_item)
+
         part_item = QTableWidgetItem("0.00")
         part_item.setFlags(part_item.flags() & ~Qt.ItemIsEditable)
         self.items_table.setItem(row, 3, part_item)
+
         flag_item = QTableWidgetItem("1" if is_gratis else "0")
         flag_item.setFlags(flag_item.flags() & ~Qt.ItemIsEditable)
         self.items_table.setItem(row, 4, flag_item)
+
+        # WYŚRODKOWANE CHECKBOXY - użycie QTableWidgetItem z flagą checkable
         if not is_gratis:
-            flask_checkbox = QCheckBox()
-            flask_checkbox.setToolTip("Flakon — po zaznaczeniu ilość (ml) można wpisać ręcznie")
-            flask_checkbox.stateChanged.connect(lambda state, r=row: self.on_flask_checkbox_changed(r, state))
-            self.items_table.setCellWidget(row, 5, flask_checkbox)
+            # Flakon jako checkable QTableWidgetItem z wyśrodkowaniem
+            flask_item = QTableWidgetItem()
+            flask_item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            flask_item.setCheckState(Qt.Unchecked)
+            flask_item.setText("")  # Usuń tekst, pozostaw tylko checkbox
+            flask_item.setTextAlignment(Qt.AlignCenter)  # KLUCZOWE - wyśrodkowanie
+            self.items_table.setItem(row, 5, flask_item)
+            
+            # Rozbiórka jako checkable QTableWidgetItem z wyśrodkowaniem
+            split_item = QTableWidgetItem()
+            split_item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            split_item.setCheckState(Qt.Unchecked)
+            split_item.setText("")  # Usuń tekst, pozostaw tylko checkbox
+            split_item.setTextAlignment(Qt.AlignCenter)  # KLUCZOWE - wyśrodkowanie
+            self.items_table.setItem(row, 6, split_item)
         else:
-            empty_lbl = QLabel("")   # Pusta komórka dla gratisów, zachowuje spójność kolumn
-            self.items_table.setCellWidget(row, 5, empty_lbl)
-        # Przycisk Usuń
+            # Dla gratis, dodaj puste items
+            self.items_table.setItem(row, 5, QTableWidgetItem(""))
+            self.items_table.setItem(row, 6, QTableWidgetItem(""))
+
         del_btn = QPushButton("Usuń")
         del_btn.setToolTip("Usuń tę pozycję zamówienia")
         del_btn.clicked.connect(partial(self.delete_item_row, row))
-        self.items_table.setCellWidget(row, 6, del_btn)
+        self.items_table.setCellWidget(row, 7, del_btn)
+        self.items_table.setCellWidget(row, 8, QWidget())
+
+        # Podłączenie sygnału itemChanged do obsługi zmiany stanu checkboxów
+        self.items_table.itemChanged.connect(self.on_checkbox_changed)
+
         self.update_price_for_row(row)
+
+    def on_checkbox_changed(self, item):
+        """Obsługa zmiany stanu checkboxów Flakon i Rozbiórka"""
+        row = item.row()
+        col = item.column()
+        
+        # Obsługa checkboxa Flakon (kolumna 5)
+        if col == 5:
+            self.on_flask_checkbox_changed(row, item.checkState())
+        # Obsługa checkboxa Rozbiórka (kolumna 6) - dodaj logikę jeśli potrzebna
+        elif col == 6:
+            pass  # Dodaj obsługę rozbiórki jeśli potrzebna
 
     def delete_item_row(self, row):
         self.items_table.removeRow(row)
-        # Przeindeksuj przyciski Usuń
+        # Aktualizuj callbacki przycisków usuń po usunięciu wiersza
         for r in range(self.items_table.rowCount()):
-            widget = self.items_table.cellWidget(r, 6)
+            widget = self.items_table.cellWidget(r, 7)
             if isinstance(widget, QPushButton):
                 try:
                     widget.clicked.disconnect()
                 except Exception:
                     pass
-                from functools import partial
                 widget.clicked.connect(partial(self.delete_item_row, r))
         self.recalculate_total()
+
+    def get_flask_checkbox_state(self, row):
+        """Zwraca stan checkboxa Flakon dla danego wiersza"""
+        item = self.items_table.item(row, 5)
+        return item and item.checkState() == Qt.Checked
+
+    def get_split_checkbox_state(self, row):
+        """Zwraca stan checkboxa Rozbiórka dla danego wiersza"""
+        item = self.items_table.item(row, 6)
+        return item and item.checkState() == Qt.Checked
 
     def on_flask_checkbox_changed(self, row, state):
         qty_widget = self.items_table.cellWidget(row, 1)
@@ -208,8 +245,6 @@ class AddOrderDialog(QDialog):
                     current_qty = float(qty_widget.text())
                 except Exception:
                     current_qty = 0
-            from PyQt5.QtWidgets import QLineEdit
-            from PyQt5.QtGui import QDoubleValidator
             line_edit = QLineEdit()
             line_edit.setValidator(QDoubleValidator(0.01, 10000.0, 2))
             pid = self.items_table.cellWidget(row, 0).currentData()
@@ -218,7 +253,7 @@ class AddOrderDialog(QDialog):
                 line_edit.setText(str(perfume.to_decant or ''))
             else:
                 line_edit.setText(str(current_qty))
-            line_edit.editingFinished.connect(lambda r=row: self.update_price_for_row(r))
+            line_edit.editingFinished.connect(partial(self.update_price_for_row, row))
             self.items_table.setCellWidget(row, 1, line_edit)
         else:
             combo = QComboBox()
@@ -234,7 +269,7 @@ class AddOrderDialog(QDialog):
                     combo.setCurrentIndex(ML_OPTIONS.index(current_qty))
             except Exception:
                 pass
-            combo.currentIndexChanged.connect(lambda _, r=row: self.update_price_for_row(r))
+            combo.currentIndexChanged.connect(partial(self.update_price_for_row, row))
             self.items_table.setCellWidget(row, 1, combo)
         self.update_price_for_row(row)
 
@@ -257,7 +292,7 @@ class AddOrderDialog(QDialog):
         else:
             qty = 0
         price_ml = 0.0 if is_gratis or perfume is None else (perfume.price_per_ml or 0.0)
-        partial = 0.0 if is_gratis else price_ml * qty
+        partial_sum = 0.0 if is_gratis else price_ml * qty
         price_item = self.items_table.item(row, 2)
         if price_item is None:
             price_item = QTableWidgetItem()
@@ -269,7 +304,7 @@ class AddOrderDialog(QDialog):
             part_item = QTableWidgetItem()
             part_item.setFlags(part_item.flags() & ~Qt.ItemIsEditable)
             self.items_table.setItem(row, 3, part_item)
-        part_item.setText(f"{partial:.2f}")
+        part_item.setText(f"{partial_sum:.2f}")
         self.recalculate_total()
 
     def recalculate_total(self):
@@ -285,8 +320,6 @@ class AddOrderDialog(QDialog):
             total += part
             count_paid += 1
         ship_key = self.shipping_combo.currentData()
-
-        # MOD: Jeśli wybrano 'Własna etykieta', koszt = 0
         ship_cost = 0.0 if ship_key == "Własna etykieta" else SHIPPING_OPTIONS.get(ship_key, 0.0)
         total += ship_cost + count_paid * ORDER_VIAL_COST
         self.total_label.setText(f"Suma do zapłaty: {total:.2f} zł")
@@ -315,9 +348,20 @@ class AddOrderDialog(QDialog):
         self.confirmation_date = order.confirmation_date
         self.items_table.setRowCount(0)
         items = self.session.query(OrderItem).filter_by(order_id=order.id).all()
-        for oi in items:
+        for i, oi in enumerate(items):
             p = next((x for x in self._perfume_cache if x.id == oi.perfume_id), None)
-            self.add_item_row(perfume_obj=p, is_gratis=(oi.price_per_ml == 0), default_ml=int(round(oi.quantity_ml)))
+            is_gratis = (oi.price_per_ml == 0)
+            self.add_item_row(perfume_obj=p, is_gratis=is_gratis, default_ml=int(round(oi.quantity_ml)))
+            if not is_gratis:
+                # Ustawienie stanu checkboxów po dodaniu wiersza z wyśrodkowaniem
+                flask_item = self.items_table.item(i, 5)
+                if flask_item:
+                    flask_item.setCheckState(Qt.Checked if getattr(oi, "is_flask", False) else Qt.Unchecked)
+                    flask_item.setTextAlignment(Qt.AlignCenter)  # Wyśrodkowanie przy edycji
+                split_item = self.items_table.item(i, 6)
+                if split_item:
+                    split_item.setCheckState(Qt.Checked if getattr(oi, "is_split", False) else Qt.Unchecked)
+                    split_item.setTextAlignment(Qt.AlignCenter)  # Wyśrodkowanie przy edycji
 
     def save_order(self):
         if self.items_table.rowCount() == 0:
@@ -335,12 +379,13 @@ class AddOrderDialog(QDialog):
             QMessageBox.warning(self, "Błąd", "Wprowadź kupującego!")
             return
         order = self.order_to_edit or Order()
-        if not self.order_to_edit:
+        new_order = not self.order_to_edit
+        if new_order:
             self.session.add(order)
+            self.session.flush()
         order.buyer = buyer
         order.notes = self.notes_input.toPlainText().strip()
         ship_key = self.shipping_combo.currentData()
-        # MOD: Dla 'Własna etykieta' wymuś koszt 0.0
         order.shipping = 0.0 if ship_key == "Własna etykieta" else SHIPPING_OPTIONS.get(ship_key, 0.0)
         order.total = float(self.total_label.text().split(":")[1].split()[0].replace(",", "."))
         order.sent_message = self.cb_msg.isChecked()
@@ -356,6 +401,12 @@ class AddOrderDialog(QDialog):
         else:
             self.confirmation_date = None
         order.confirmation_date = self.confirmation_date
+        is_split = any([
+            self.get_split_checkbox_state(r)
+            for r in range(self.items_table.rowCount())
+        ])
+        order.is_split = is_split
+
         try:
             if self.order_to_edit:
                 self.session.query(OrderItem).filter_by(order_id=order.id).delete()
@@ -375,12 +426,16 @@ class AddOrderDialog(QDialog):
                     qty = 0
                 price = 0.0 if is_gratis else float(self.items_table.item(r, 2).text().replace(",", "."))
                 part = 0.0 if is_gratis else float(self.items_table.item(r, 3).text().replace(",", "."))
+                is_flask = self.get_flask_checkbox_state(r)
+                is_split_poz = self.get_split_checkbox_state(r)
                 oi = OrderItem(
                     order_id=order.id,
                     perfume_id=pid,
                     quantity_ml=qty,
                     price_per_ml=price,
-                    partial_sum=part
+                    partial_sum=part,
+                    is_flask=is_flask,
+                    is_split=is_split_poz
                 )
                 self.session.add(oi)
             self.session.commit()
@@ -423,14 +478,12 @@ class AddOrderDialog(QDialog):
         vial_sum = count_paid * ORDER_VIAL_COST
         total += vial_sum
         delivery_key = self.shipping_combo.currentData()
-        # MOD: Sprawdź, czy wybrano 'Własna etykieta'
         is_wlasna_etykieta = delivery_key == "Własna etykieta"
         delivery_cost = 0.0 if is_wlasna_etykieta else SHIPPING_OPTIONS.get(delivery_key, 0.0)
         total_with = total + delivery_cost
         msg = "Podsumowanie:\n" + "\n".join(items_summary)
         if count_paid:
             msg += f"\nDekanty -> {count_paid} x {ORDER_VIAL_COST:.0f} zł = {fmt(vial_sum)}zł"
-        # MOD: informacja o wysyłce tylko jeśli to nie 'Własna etykieta'
         if not is_wlasna_etykieta and delivery_cost:
             msg += f"\nZa dostawę {delivery_key} doliczamy {int(delivery_cost)}zł"
         msg += f"\nRazem: {fmt(total_with)}zł\n\n"

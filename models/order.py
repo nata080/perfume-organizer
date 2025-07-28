@@ -1,10 +1,8 @@
 from sqlalchemy import Column, Integer, String, Float, Boolean, Date
-
 from models.database import Base
 
 class Order(Base):
     __tablename__ = 'orders'
-
     id = Column(Integer, primary_key=True)
     buyer = Column(String)
     shipping = Column(Float, default=0)
@@ -16,8 +14,9 @@ class Order(Base):
     sent = Column(Boolean, default=False)
     confirmation_obtained = Column(Boolean, default=False)
     sale_date = Column(Date, nullable=True)
-    notes = Column(String, default="")  # <-- pole uwag
+    notes = Column(String, default="")
     confirmation_date = Column(Date, nullable=True)
+    is_split = Column(Boolean, default=False)
 
     def __repr__(self):
-        return f"<Order {self.buyer}>"
+        return f""
