@@ -1,145 +1,193 @@
 # ui/orders_view.py
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget, QTableWidgetItem,
-    QLabel, QLineEdit, QComboBox, QMessageBox, QHeaderView
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QComboBox,
+    QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox
 )
-from PyQt5.QtGui import QColor, QFont
+from PyQt5.QtGui import QFont, QColor
+from PyQt5.QtCore import Qt
 from functools import partial
+
 from models.database import Session
 from models.order import Order
-from models.perfume import Perfume
 from models.order_item import OrderItem
+from models.perfume import Perfume
 from ui.add_order_dialog import AddOrderDialog
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  WŁASNE KLASY KOMÓREK – zapewniają sortowanie numeryczne
+# ─────────────────────────────────────────────────────────────────────────────
+class IntItem(QTableWidgetItem):
+    """Komórka sortowana jako liczba całkowita."""
+    def __init__(self, val: int):
+        super().__init__(str(val))
+        self._val = val
+
+    def __lt__(self, other):
+        # sortuj tylko z innym IntItem
+        if isinstance(other, IntItem):
+            return self._val < other._val
+        return super().__lt__(other)
+
+
+class FloatItem(QTableWidgetItem):
+    """Komórka sortowana jako liczba zmiennoprzecinkowa."""
+    def __init__(self, val: float, precision: int = 2):
+        super().__init__(f"{val:.{precision}f}")
+        self._val = val
+
+    def __lt__(self, other):
+        if isinstance(other, FloatItem):
+            return self._val < other._val
+        return super().__lt__(other)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#                                GŁÓWNA KLASA
+# ─────────────────────────────────────────────────────────────────────────────
 class OrdersView(QWidget):
+    """Zakładka z listą zamówień."""
+
     def __init__(self, perfumes_view=None, parent=None):
         super().__init__(parent)
         self.session = Session()
         self.perfumes_view = perfumes_view
-        
+
         font = QFont()
         font.setPointSize(9)
         self.setFont(font)
-        
-        layout = QVBoxLayout(self)
-        
-        # --- Filtr i wyszukiwarka ---
-        row1 = QHBoxLayout()
-        
+
+        root = QVBoxLayout(self)
+
+        # ── FILTRY ──────────────────────────────────────────────────────────
+        filters = QHBoxLayout()
         self.filter_combo = QComboBox()
         self.filter_combo.addItems(["Wszystkie", "Rozbiórka"])
         self.filter_combo.currentIndexChanged.connect(self.load_orders)
-        row1.addWidget(QLabel("Filtr:"))
-        row1.addWidget(self.filter_combo)
-        
-        row1.addStretch()
-        
-        row1.addWidget(QLabel("Kupujący:"))
-        self.search_buyer_edit = QLineEdit()
-        self.search_buyer_edit.setPlaceholderText("Szukaj po kupującym…")
-        self.search_buyer_edit.textChanged.connect(self.load_orders)
-        row1.addWidget(self.search_buyer_edit)
-        
-        layout.addLayout(row1)
-        
+
+        filters.addWidget(QLabel("Filtr:"))
+        filters.addWidget(self.filter_combo)
+        filters.addStretch()
+
+        filters.addWidget(QLabel("Kupujący:"))
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("Szukaj po kupującym…")
+        self.search_edit.textChanged.connect(self.load_orders)
+        filters.addWidget(self.search_edit)
+
+        root.addLayout(filters)
+
+        # ── PRZYCISK DODAJ ─────────────────────────────────────────────────
         add_btn = QPushButton("Dodaj zamówienie")
         add_btn.clicked.connect(self.open_new_order)
-        layout.addWidget(add_btn)
-        
-        self.table = QTableWidget(0, 11)
+        root.addWidget(add_btn)
+
+        # ── TABELA ────────────────────────────────────────────────────────
+        self.table = QTableWidget(0, 12)
         self.table.setHorizontalHeaderLabels([
-            "Kupujący", "Perfumy", "Kwota", "Wysyłka", "Stan",
-            "Data sprzedaży", "Gratis", "Uwagi", "Data potw.", "Edytuj", "Usuń"
+            "Lp", "Kupujący", "Perfumy", "Kwota", "Wysyłka", "Stan",
+            "Data sprzedaży", "Gratis", "Uwagi", "Data potw.",
+            "Edytuj", "Usuń"
         ])
-        layout.addWidget(self.table)
-        
-        self.setLayout(layout)
-        
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        root.addWidget(self.table)
+        self.setLayout(root)
+
+        # Ukryj numerację wierszy
+        self.table.verticalHeader().setVisible(False)
         self.table.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
+        self.table.verticalHeader().setDefaultSectionSize(24)
+
+        # Kolumna Lp – stała, wąska szerokość
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
+        self.table.setColumnWidth(0, 50)
+
         self.table.setAlternatingRowColors(True)
         self.table.setWordWrap(True)
-        self.table.verticalHeader().setDefaultSectionSize(24)
-        self.table.setStyleSheet("QTableWidget { gridline-color: #ddd; }")
         self.table.setFont(font)
-        self.table.setSortingEnabled(True)
-        
+
         self.load_orders()
-    
+
+    # ─────────────────────────────────────────────────────────────────────
+    #                             ŁADOWANIE TABELI
+    # ─────────────────────────────────────────────────────────────────────
     def load_orders(self):
         self.table.setSortingEnabled(False)
         self.table.setRowCount(0)
-        
-        filter_mode = self.filter_combo.currentText()
-        buyer_search = self.search_buyer_edit.text().strip().lower()
-        
+
         orders = self.session.query(Order).all()
-        
-        if filter_mode == "Rozbiórka":
+
+        if self.filter_combo.currentText() == "Rozbiórka":
             orders = [o for o in orders if getattr(o, "is_split", False)]
-        
-        if buyer_search:
-            orders = [o for o in orders if buyer_search in (o.buyer or "").lower()]
-        
-        for order in orders:
+
+        buyer_q = self.search_edit.text().strip().lower()
+        if buyer_q:
+            orders = [o for o in orders if buyer_q in (o.buyer or "").lower()]
+
+        for lp, order in enumerate(orders, 1):
+            items = self.session.query(OrderItem).filter_by(order_id=order.id).all()
             row = self.table.rowCount()
             self.table.insertRow(row)
-            
-            items = self.session.query(OrderItem).filter_by(order_id=order.id).all()
-            
+
             paid = ", ".join(
-                f"{self.session.get(Perfume, oi.perfume_id).brand} {self.session.get(Perfume, oi.perfume_id).name} ({oi.quantity_ml} ml)"
-                for oi in items if oi.price_per_ml > 0 and self.session.get(Perfume, oi.perfume_id)
+                f"{self.session.get(Perfume, i.perfume_id).brand} "
+                f"{self.session.get(Perfume, i.perfume_id).name} ({i.quantity_ml} ml)"
+                for i in items if i.price_per_ml > 0 and self.session.get(Perfume, i.perfume_id)
             )
-            
             gratis = ", ".join(
-                f"{self.session.get(Perfume, oi.perfume_id).brand} {self.session.get(Perfume, oi.perfume_id).name}"
-                for oi in items if oi.price_per_ml == 0 and self.session.get(Perfume, oi.perfume_id)
+                f"{self.session.get(Perfume, i.perfume_id).brand} "
+                f"{self.session.get(Perfume, i.perfume_id).name}"
+                for i in items if i.price_per_ml == 0 and self.session.get(Perfume, i.perfume_id)
             )
-            
-            status, color = self.get_status_and_color(order)
-            
-            def safeSet(row, col, val, fg=None):
-                itm = QTableWidgetItem(val)
-                if fg:
-                    itm.setForeground(fg)
-                self.table.setItem(row, col, itm)
-            
-            safeSet(row, 0, order.buyer or "")
-            safeSet(row, 1, paid)
-            safeSet(row, 2, f"{order.total:.2f}")
-            safeSet(row, 3, f"{order.shipping:.2f}")
-            safeSet(row, 4, status, color)
-            safeSet(row, 5, str(order.sale_date or ""))
-            safeSet(row, 6, gratis)
-            safeSet(row, 7, order.notes or "")
-            
-            confirmation_date_str = order.confirmation_date.isoformat() if order.confirmation_date else ""
-            safeSet(row, 8, confirmation_date_str)
-            
-            # Edytuj
+
+            status_txt, status_col = self._status(order)
+
+            # Komórki
+            self.table.setItem(row, 0,  IntItem(lp))
+            self.table.setItem(row, 1,  QTableWidgetItem(order.buyer or ""))
+            self.table.setItem(row, 2,  QTableWidgetItem(paid))
+            self.table.setItem(row, 3,  FloatItem(order.total))
+            self.table.setItem(row, 4,  FloatItem(order.shipping))
+            self.table.setItem(row, 5,  self._colored_item(status_txt, status_col))
+            self.table.setItem(row, 6,  QTableWidgetItem(str(order.sale_date or "")))
+            self.table.setItem(row, 7,  QTableWidgetItem(gratis))
+            self.table.setItem(row, 8,  QTableWidgetItem(order.notes or ""))
+            self.table.setItem(row, 9,  QTableWidgetItem(
+                order.confirmation_date.isoformat() if order.confirmation_date else "")
+            )
+
+            # Przyciski
             edit_btn = QPushButton("Edytuj")
             edit_btn.clicked.connect(partial(self.edit_order, order.id))
-            self.table.setCellWidget(row, 9, edit_btn)
-            
-            # Usuń
+            self.table.setCellWidget(row, 10, edit_btn)
+
             del_btn = QPushButton("Usuń")
             del_btn.clicked.connect(partial(self.delete_order, order.id))
-            self.table.setCellWidget(row, 10, del_btn)
-            
-            # Ustawienie stałej wysokości wiersza na 24 piksele
-            self.table.setRowHeight(row, 24)
-            
-            if hasattr(order, "is_split") and order.is_split:
-                color_bg = QColor(210, 234, 255)
-                for col in range(self.table.columnCount()):
-                    item = self.table.item(row, col)
-                    if item:
-                        item.setBackground(color_bg)
-        
+            self.table.setCellWidget(row, 11, del_btn)
+
+            # Wiersze rozbiórkowe – podświetlenie
+            if getattr(order, "is_split", False):
+                bg = QColor(210, 234, 255)
+                for c in range(self.table.columnCount()):
+                    cell = self.table.item(row, c)
+                    if cell:
+                        cell.setBackground(bg)
+
+        # Domyślne sortowanie po Lp (numerycznie)
         self.table.setSortingEnabled(True)
-    
-    def get_status_and_color(self, o):
+        self.table.sortItems(0, Qt.AscendingOrder)
+
+    # ─────────────────────────────────────────────────────────────────────
+    #                           POMOCNICZE
+    # ─────────────────────────────────────────────────────────────────────
+    @staticmethod
+    def _colored_item(text, color: QColor):
+        item = QTableWidgetItem(text)
+        item.setForeground(color)
+        return item
+
+    @staticmethod
+    def _status(o: Order):
         if o.confirmation_obtained:
             return "Zakończone", QColor("gray")
         if o.sent:
@@ -151,40 +199,42 @@ class OrdersView(QWidget):
         if o.sent_message:
             return "Oczekiwanie na zapłatę", QColor("black")
         return "Wyślij wiadomość", QColor("red")
-    
+
+    # ─────────────────────────────────────────────────────────────────────
+    #                              AKCJE
+    # ─────────────────────────────────────────────────────────────────────
     def open_new_order(self):
         dlg = AddOrderDialog(self)
         if dlg.exec_():
             if self.perfumes_view:
                 self.perfumes_view.load_perfumes()
             self.load_orders()
-    
-    def edit_order(self, order_id):
+
+    def edit_order(self, order_id: int):
         order = self.session.get(Order, order_id)
         if not order:
             QMessageBox.warning(self, "Błąd", "Nie znaleziono zamówienia.")
             return
-        
         dlg = AddOrderDialog(self, order_to_edit=order)
         if dlg.exec_():
             if self.perfumes_view:
                 self.perfumes_view.load_perfumes()
             self.load_orders()
-    
-    def delete_order(self, order_id):
-        reply = QMessageBox.question(
+
+    def delete_order(self, order_id: int):
+        if QMessageBox.question(
             self, "Usuń zamówienie",
             "Czy na pewno chcesz usunąć to zamówienie?",
             QMessageBox.Yes | QMessageBox.No
-        )
-        if reply == QMessageBox.Yes:
-            try:
-                self.session.query(OrderItem).filter_by(order_id=order_id).delete()
-                self.session.query(Order).filter_by(id=order_id).delete()
-                self.session.commit()
-                if self.perfumes_view:
-                    self.perfumes_view.load_perfumes()
-                self.load_orders()
-            except Exception as e:
-                self.session.rollback()
-                QMessageBox.critical(self, "Błąd", f"Nie udało się usunąć: {e}")
+        ) != QMessageBox.Yes:
+            return
+        try:
+            self.session.query(OrderItem).filter_by(order_id=order_id).delete()
+            self.session.query(Order).filter_by(id=order_id).delete()
+            self.session.commit()
+            if self.perfumes_view:
+                self.perfumes_view.load_perfumes()
+            self.load_orders()
+        except Exception as e:
+            self.session.rollback()
+            QMessageBox.critical(self, "Błąd", f"Nie udało się usunąć: {e}")
