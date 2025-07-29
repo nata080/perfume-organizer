@@ -18,7 +18,8 @@
   <a target="code" href="///C:/NATA/Projekty/Perfumy/main.py" type="text/plain"><tt>main.py</tt></a>
 <span class="moduletype">Script</span>  <div class="import">
 imports:
-    <a href="#PyQt5.QtWidgets">PyQt5.QtWidgets</a>
+    <a href="#PyQt5.QtCore">PyQt5.QtCore</a>
+ &#8226;   <a href="#PyQt5.QtWidgets">PyQt5.QtWidgets</a>
  &#8226;   <a href="#_collections_abc">_collections_abc</a>
  &#8226;   <a href="#_weakrefset">_weakrefset</a>
  &#8226;   <a href="#abc">abc</a>
@@ -156,7 +157,6 @@ imports:
  &#8226;   <a href="#keyword">keyword</a>
  &#8226;   <a href="#linecache">linecache</a>
  &#8226;   <a href="#locale">locale</a>
- &#8226;   <a href="#models.database">models.database</a>
  &#8226;   <a href="#ntpath">ntpath</a>
  &#8226;   <a href="#operator">operator</a>
  &#8226;   <a href="#os">os</a>
@@ -349,7 +349,6 @@ imported by:
 <span class="moduletype">MissingModule</span>  <div class="import">
 imported by:
     <a href="#platform">platform</a>
- &#8226;   <a href="#xml.sax._exceptions">xml.sax._exceptions</a>
 
   </div>
 
@@ -2620,10 +2619,12 @@ imported by:
     <a href="#PyQt5">PyQt5</a>
  &#8226;   <a href="#PyQt5.QtGui">PyQt5.QtGui</a>
  &#8226;   <a href="#PyQt5.QtWidgets">PyQt5.QtWidgets</a>
+ &#8226;   <a href="#main.py">main.py</a>
  &#8226;   <a href="#matplotlib.backends.qt_compat">matplotlib.backends.qt_compat</a>
  &#8226;   <a href="#ui.add_order_dialog">ui.add_order_dialog</a>
  &#8226;   <a href="#ui.add_perfume_dialog">ui.add_perfume_dialog</a>
  &#8226;   <a href="#ui.edit_perfume_dialog">ui.edit_perfume_dialog</a>
+ &#8226;   <a href="#ui.main_window">ui.main_window</a>
 
   </div>
 
@@ -7627,6 +7628,7 @@ imported by:
  &#8226;   <a href="#tornado.template">tornado.template</a>
  &#8226;   <a href="#tornado.util">tornado.util</a>
  &#8226;   <a href="#tornado.web">tornado.web</a>
+ &#8226;   <a href="#ui.add_order_dialog">ui.add_order_dialog</a>
  &#8226;   <a href="#ui.perfumes_view">ui.perfumes_view</a>
  &#8226;   <a href="#xmlrpc.client">xmlrpc.client</a>
  &#8226;   <a href="#xmlrpc.server">xmlrpc.server</a>
@@ -12702,6 +12704,7 @@ imported by:
  &#8226;   <a href="#types">types</a>
  &#8226;   <a href="#typing">typing</a>
  &#8226;   <a href="#typing_extensions">typing_extensions</a>
+ &#8226;   <a href="#ui.add_order_dialog">ui.add_order_dialog</a>
  &#8226;   <a href="#ui.orders_view">ui.orders_view</a>
  &#8226;   <a href="#unittest.case">unittest.case</a>
  &#8226;   <a href="#unittest.loader">unittest.loader</a>
@@ -14482,7 +14485,7 @@ imported by:
   <a target="code" href="" type="text/plain"><tt>java</tt></a>
 <span class="moduletype">MissingModule</span>  <div class="import">
 imported by:
-    <a href="#platform">platform</a>
+    <a href="#xml.sax._exceptions">xml.sax._exceptions</a>
 
   </div>
 
@@ -19042,8 +19045,7 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#main.py">main.py</a>
- &#8226;   <a href="#models.order">models.order</a>
+    <a href="#models.order">models.order</a>
  &#8226;   <a href="#models.order_item">models.order_item</a>
  &#8226;   <a href="#models.perfume">models.perfume</a>
  &#8226;   <a href="#ui.add_order_dialog">ui.add_order_dialog</a>
@@ -25851,7 +25853,6 @@ imported by:
  &#8226;   <a href="#tornado.tcpserver">tornado.tcpserver</a>
  &#8226;   <a href="#tornado.util">tornado.util</a>
  &#8226;   <a href="#tornado.websocket">tornado.websocket</a>
- &#8226;   <a href="#ui.orders_view">ui.orders_view</a>
  &#8226;   <a href="#ui.perfumes_view">ui.perfumes_view</a>
  &#8226;   <a href="#unittest.loader">unittest.loader</a>
  &#8226;   <a href="#unittest.main">unittest.main</a>
@@ -27685,7 +27686,6 @@ imports:
  &#8226;   <a href="#collections">collections</a>
  &#8226;   <a href="#functools">functools</a>
  &#8226;   <a href="#itertools">itertools</a>
- &#8226;   <a href="#java">java</a>
  &#8226;   <a href="#os">os</a>
  &#8226;   <a href="#re">re</a>
  &#8226;   <a href="#socket">socket</a>
@@ -45246,6 +45246,8 @@ imports:
     <a href="#PyQt5.QtCore">PyQt5.QtCore</a>
  &#8226;   <a href="#PyQt5.QtGui">PyQt5.QtGui</a>
  &#8226;   <a href="#PyQt5.QtWidgets">PyQt5.QtWidgets</a>
+ &#8226;   <a href="#datetime">datetime</a>
+ &#8226;   <a href="#functools">functools</a>
  &#8226;   <a href="#models.database">models.database</a>
  &#8226;   <a href="#models.order">models.order</a>
  &#8226;   <a href="#models.order_item">models.order_item</a>
@@ -45325,7 +45327,8 @@ imported by:
   <a target="code" href="///C:/NATA/Projekty/Perfumy/ui/main_window.py" type="text/plain"><tt>ui.main_window</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
-    <a href="#PyQt5.QtWidgets">PyQt5.QtWidgets</a>
+    <a href="#PyQt5.QtCore">PyQt5.QtCore</a>
+ &#8226;   <a href="#PyQt5.QtWidgets">PyQt5.QtWidgets</a>
  &#8226;   <a href="#ui">ui</a>
  &#8226;   <a href="#ui.gotowe_odlewki_view">ui.gotowe_odlewki_view</a>
  &#8226;   <a href="#ui.pelne_flakony_view">ui.pelne_flakony_view</a>
@@ -45369,7 +45372,6 @@ imports:
  &#8226;   <a href="#models.order">models.order</a>
  &#8226;   <a href="#models.order_item">models.order_item</a>
  &#8226;   <a href="#models.perfume">models.perfume</a>
- &#8226;   <a href="#os">os</a>
  &#8226;   <a href="#ui">ui</a>
  &#8226;   <a href="#ui.add_order_dialog">ui.add_order_dialog</a>
 
@@ -46797,7 +46799,6 @@ imported by:
 <span class="moduletype">Package</span>  <div class="import">
 imports:
     <a href="#xml">xml</a>
- &#8226;   <a href="#xml.parsers.expat">xml.parsers.expat</a>
 
   </div>
   <div class="import">
@@ -46828,7 +46829,6 @@ imported by:
  &#8226;   <a href="#plistlib">plistlib</a>
  &#8226;   <a href="#xml.dom.expatbuilder">xml.dom.expatbuilder</a>
  &#8226;   <a href="#xml.etree.ElementTree">xml.etree.ElementTree</a>
- &#8226;   <a href="#xml.parsers">xml.parsers</a>
  &#8226;   <a href="#xml.sax.expatreader">xml.sax.expatreader</a>
  &#8226;   <a href="#xmlrpc.client">xmlrpc.client</a>
 
@@ -46874,7 +46874,7 @@ imported by:
   <a target="code" href="///C:/Users/natgr/anaconda3/Lib/xml/sax/_exceptions.py" type="text/plain"><tt>xml.sax._exceptions</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
-    <a href="#'java.lang'">'java.lang'</a>
+    <a href="#java">java</a>
  &#8226;   <a href="#sys">sys</a>
  &#8226;   <a href="#xml.sax">xml.sax</a>
 

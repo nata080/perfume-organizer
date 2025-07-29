@@ -1,13 +1,11 @@
 from datetime import date
 from functools import partial
-
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QTableWidget, QTableWidgetItem,
-    QComboBox, QPushButton, QCheckBox, QHeaderView, QDateEdit, QMessageBox, QInputDialog,
-    QTextEdit, QWidget
+    QComboBox, QPushButton, QCheckBox, QHeaderView, QDateEdit, QMessageBox, QInputDialog, QTextEdit, QWidget, QHBoxLayout
 )
 from PyQt5.QtGui import QFont, QDoubleValidator
-from PyQt5.QtCore import QDate, Qt, QCoreApplication
+from PyQt5.QtCore import QDate, Qt, QTimer
 
 from models.database import Session
 from models.perfume import Perfume
@@ -127,10 +125,35 @@ class AddOrderDialog(QDialog):
         self._perfume_cache = self.session.query(Perfume).filter(Perfume.status == "Dostępny").all()
         self.items_table.cellChanged.connect(lambda r, c: self.update_price_for_row(r))
 
+        # KLUCZOWA ZMIANA: Lista do przechowywania danych checkboxów - IDENTYCZNE jak dla nowych zamówień
+        self._pending_checkbox_states = []
+
         if self.order_to_edit:
-            self.fill_with_order(self.order_to_edit)
+            # KLUCZOWA ZMIANA: Opóźnij wypełnienie formularza - IDENTYCZNE jak dla nowych zamówień
+            QTimer.singleShot(0, lambda: self.fill_with_order(self.order_to_edit))
         else:
-            self.add_item_row(default_ml=5)
+            # Opóźnij inicjalizację pierwszego wiersza dla nowych zamówień
+            QTimer.singleShot(0, lambda: self.add_item_row(default_ml=5))
+
+    def get_perfume_id_from_combo(self, combo):
+        """
+        Bezpieczne pobieranie ID perfumy z QComboBox
+        Rozwiązuje problem z currentData() zwracającym None dla pierwszej opcji
+        """
+        if combo is None:
+            return None
+        
+        # Spróbuj najpierw currentData() - normalny sposób
+        pid = combo.currentData()
+        if pid is not None:
+            return pid
+        
+        # FALLBACK: jeśli currentData() zwraca None, użyj currentIndex()
+        current_index = combo.currentIndex()
+        if 0 <= current_index < len(self._perfume_cache):
+            return self._perfume_cache[current_index].id
+        
+        return None
 
     def add_item_row(self, perfume_obj=None, is_gratis=False, default_ml=5):
         row = self.items_table.rowCount()
@@ -143,6 +166,11 @@ class AddOrderDialog(QDialog):
         if perfume_obj:
             idx = next((i for i, p in enumerate(self._perfume_cache) if p.id == perfume_obj.id), 0)
             combo.setCurrentIndex(idx)
+        
+        # Wymuś aktualizację dla pierwszej opcji
+        if not perfume_obj and self._perfume_cache:
+            combo.setCurrentIndex(0)
+        
         combo.currentIndexChanged.connect(partial(self.update_price_for_row, row))
         self.items_table.setCellWidget(row, 0, combo)
 
@@ -166,27 +194,34 @@ class AddOrderDialog(QDialog):
         flag_item.setFlags(flag_item.flags() & ~Qt.ItemIsEditable)
         self.items_table.setItem(row, 4, flag_item)
 
-        # WYŚRODKOWANE CHECKBOXY - użycie QTableWidgetItem z flagą checkable
+        # Wyśrodkowane checkboxy przez QCheckBox w QWidget z QHBoxLayout
         if not is_gratis:
-            # Flakon jako checkable QTableWidgetItem z wyśrodkowaniem
-            flask_item = QTableWidgetItem()
-            flask_item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
-            flask_item.setCheckState(Qt.Unchecked)
-            flask_item.setText("")  # Usuń tekst, pozostaw tylko checkbox
-            flask_item.setTextAlignment(Qt.AlignCenter)  # KLUCZOWE - wyśrodkowanie
-            self.items_table.setItem(row, 5, flask_item)
+            # Flakon
+            flask_checkbox = QCheckBox()
+            flask_checkbox.setToolTip("Flakon — po zaznaczeniu ilość (ml) można wpisać ręcznie")
+            flask_checkbox.stateChanged.connect(partial(self.on_flask_checkbox_changed, row))
+            flask_widget = QWidget()
+            flask_layout = QHBoxLayout(flask_widget)
+            flask_layout.setContentsMargins(0, 0, 0, 0)
+            flask_layout.setAlignment(Qt.AlignCenter)
+            flask_layout.addWidget(flask_checkbox)
+            flask_widget.show()
+            self.items_table.setCellWidget(row, 5, flask_widget)
             
-            # Rozbiórka jako checkable QTableWidgetItem z wyśrodkowaniem
-            split_item = QTableWidgetItem()
-            split_item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
-            split_item.setCheckState(Qt.Unchecked)
-            split_item.setText("")  # Usuń tekst, pozostaw tylko checkbox
-            split_item.setTextAlignment(Qt.AlignCenter)  # KLUCZOWE - wyśrodkowanie
-            self.items_table.setItem(row, 6, split_item)
+            # Rozbiórka
+            split_checkbox = QCheckBox()
+            split_checkbox.setToolTip("Pozycja zamówienia jest rozbiórkowa")
+            split_checkbox.stateChanged.connect(partial(self.on_split_checkbox_changed, row))
+            split_widget = QWidget()
+            split_layout = QHBoxLayout(split_widget)
+            split_layout.setContentsMargins(0, 0, 0, 0)
+            split_layout.setAlignment(Qt.AlignCenter)
+            split_layout.addWidget(split_checkbox)
+            split_widget.show()
+            self.items_table.setCellWidget(row, 6, split_widget)
         else:
-            # Dla gratis, dodaj puste items
-            self.items_table.setItem(row, 5, QTableWidgetItem(""))
-            self.items_table.setItem(row, 6, QTableWidgetItem(""))
+            self.items_table.setCellWidget(row, 5, QWidget())
+            self.items_table.setCellWidget(row, 6, QWidget())
 
         del_btn = QPushButton("Usuń")
         del_btn.setToolTip("Usuń tę pozycję zamówienia")
@@ -194,45 +229,51 @@ class AddOrderDialog(QDialog):
         self.items_table.setCellWidget(row, 7, del_btn)
         self.items_table.setCellWidget(row, 8, QWidget())
 
-        # Podłączenie sygnału itemChanged do obsługi zmiany stanu checkboxów
-        self.items_table.itemChanged.connect(self.on_checkbox_changed)
-
-        self.update_price_for_row(row)
-
-    def on_checkbox_changed(self, item):
-        """Obsługa zmiany stanu checkboxów Flakon i Rozbiórka"""
-        row = item.row()
-        col = item.column()
-        
-        # Obsługa checkboxa Flakon (kolumna 5)
-        if col == 5:
-            self.on_flask_checkbox_changed(row, item.checkState())
-        # Obsługa checkboxa Rozbiórka (kolumna 6) - dodaj logikę jeśli potrzebna
-        elif col == 6:
-            pass  # Dodaj obsługę rozbiórki jeśli potrzebna
+        # KLUCZOWA ZMIANA: Opóźnij aktualizację ceny - IDENTYCZNE jak dla nowych zamówień
+        QTimer.singleShot(0, lambda: self.update_price_for_row(row))
 
     def delete_item_row(self, row):
         self.items_table.removeRow(row)
-        # Aktualizuj callbacki przycisków usuń po usunięciu wiersza
+        # Po usunięciu wiersza aktualizuj callbacki
         for r in range(self.items_table.rowCount()):
             widget = self.items_table.cellWidget(r, 7)
             if isinstance(widget, QPushButton):
-                try:
-                    widget.clicked.disconnect()
-                except Exception:
-                    pass
+                try: widget.clicked.disconnect()
+                except Exception: pass
                 widget.clicked.connect(partial(self.delete_item_row, r))
+            flask_checkbox = self.get_flask_checkbox(r)
+            if flask_checkbox:
+                try: flask_checkbox.stateChanged.disconnect()
+                except Exception: pass
+                flask_checkbox.stateChanged.connect(partial(self.on_flask_checkbox_changed, r))
+            split_checkbox = self.get_split_checkbox(r)
+            if split_checkbox:
+                try: split_checkbox.stateChanged.disconnect()
+                except Exception: pass
+                split_checkbox.stateChanged.connect(partial(self.on_split_checkbox_changed, r))
         self.recalculate_total()
 
+    def get_flask_checkbox(self, row):
+        widget = self.items_table.cellWidget(row, 5)
+        if widget:
+            for cb in widget.findChildren(QCheckBox):
+                return cb
+        return None
+
+    def get_split_checkbox(self, row):
+        widget = self.items_table.cellWidget(row, 6)
+        if widget:
+            for cb in widget.findChildren(QCheckBox):
+                return cb
+        return None
+
     def get_flask_checkbox_state(self, row):
-        """Zwraca stan checkboxa Flakon dla danego wiersza"""
-        item = self.items_table.item(row, 5)
-        return item and item.checkState() == Qt.Checked
+        cb = self.get_flask_checkbox(row)
+        return cb and cb.isChecked()
 
     def get_split_checkbox_state(self, row):
-        """Zwraca stan checkboxa Rozbiórka dla danego wiersza"""
-        item = self.items_table.item(row, 6)
-        return item and item.checkState() == Qt.Checked
+        cb = self.get_split_checkbox(row)
+        return cb and cb.isChecked()
 
     def on_flask_checkbox_changed(self, row, state):
         qty_widget = self.items_table.cellWidget(row, 1)
@@ -247,8 +288,12 @@ class AddOrderDialog(QDialog):
                     current_qty = 0
             line_edit = QLineEdit()
             line_edit.setValidator(QDoubleValidator(0.01, 10000.0, 2))
-            pid = self.items_table.cellWidget(row, 0).currentData()
+            
+            # Użyj bezpiecznej metody pobierania ID perfumy
+            combo = self.items_table.cellWidget(row, 0)
+            pid = self.get_perfume_id_from_combo(combo)
             perfume = next((p for p in self._perfume_cache if p.id == pid), None)
+            
             if perfume is not None:
                 line_edit.setText(str(perfume.to_decant or ''))
             else:
@@ -273,12 +318,19 @@ class AddOrderDialog(QDialog):
             self.items_table.setCellWidget(row, 1, combo)
         self.update_price_for_row(row)
 
+    def on_split_checkbox_changed(self, row, state):
+        # Możesz dodać tu własną logikę - np. markowanie w tabeli
+        pass
+
     def update_price_for_row(self, row):
         flag_item = self.items_table.item(row, 4)
         is_gratis = (flag_item.text() == "1") if flag_item else False
+        
+        # Użyj bezpiecznej metody pobierania ID perfumy
         combo = self.items_table.cellWidget(row, 0)
-        pid = combo.currentData() if combo else None
+        pid = self.get_perfume_id_from_combo(combo)
         perfume = next((p for p in self._perfume_cache if p.id == pid), None)
+        
         qty_widget = self.items_table.cellWidget(row, 1)
         if qty_widget is None:
             qty = 0
@@ -291,20 +343,24 @@ class AddOrderDialog(QDialog):
                 qty = 0
         else:
             qty = 0
+        
         price_ml = 0.0 if is_gratis or perfume is None else (perfume.price_per_ml or 0.0)
         partial_sum = 0.0 if is_gratis else price_ml * qty
+
         price_item = self.items_table.item(row, 2)
         if price_item is None:
             price_item = QTableWidgetItem()
             price_item.setFlags(price_item.flags() & ~Qt.ItemIsEditable)
             self.items_table.setItem(row, 2, price_item)
         price_item.setText(f"{price_ml:.2f}")
+
         part_item = self.items_table.item(row, 3)
         if part_item is None:
             part_item = QTableWidgetItem()
             part_item.setFlags(part_item.flags() & ~Qt.ItemIsEditable)
             self.items_table.setItem(row, 3, part_item)
         part_item.setText(f"{partial_sum:.2f}")
+
         self.recalculate_total()
 
     def recalculate_total(self):
@@ -316,9 +372,10 @@ class AddOrderDialog(QDialog):
             if is_gratis:
                 continue
             part_item = self.items_table.item(r, 3)
-            part = float(part_item.text().replace(",", ".")) if part_item else 0.0
-            total += part
-            count_paid += 1
+            if part_item:  # Dodatkowe sprawdzenie bezpieczeństwa
+                part = float(part_item.text().replace(",", "."))
+                total += part
+                count_paid += 1
         ship_key = self.shipping_combo.currentData()
         ship_cost = 0.0 if ship_key == "Własna etykieta" else SHIPPING_OPTIONS.get(ship_key, 0.0)
         total += ship_cost + count_paid * ORDER_VIAL_COST
@@ -332,57 +389,102 @@ class AddOrderDialog(QDialog):
             self.add_item_row(perfume_obj=p, is_gratis=True, default_ml=3)
 
     def fill_with_order(self, order: Order):
+        """KLUCZOWA ZMIANA: Zastosowano IDENTYCZNY sposób jak dla nowych zamówień"""
         self.buyer_input.setText(order.buyer or "")
         self.notes_input.setPlainText(order.notes or "")
+        
         idx = self.shipping_combo.findData(order.shipping)
         if idx >= 0:
             self.shipping_combo.setCurrentIndex(idx)
+        
         self.cb_msg.setChecked(order.sent_message)
         self.cb_money.setChecked(order.received_money)
         self.cb_label.setChecked(order.generated_label)
         self.cb_package.setChecked(order.packed)
         self.cb_shipped.setChecked(order.sent)
         self.cb_confirm.setChecked(order.confirmation_obtained)
+        
         if order.sale_date:
             self.sale_date_edit.setDate(QDate(order.sale_date.year, order.sale_date.month, order.sale_date.day))
+        
         self.confirmation_date = order.confirmation_date
+        
         self.items_table.setRowCount(0)
         items = self.session.query(OrderItem).filter_by(order_id=order.id).all()
+        
+        # KLUCZOWA ZMIANA: Przygotuj dane checkboxów do opóźnionego ustawienia
+        self._pending_checkbox_states = []
+        
         for i, oi in enumerate(items):
             p = next((x for x in self._perfume_cache if x.id == oi.perfume_id), None)
             is_gratis = (oi.price_per_ml == 0)
-            self.add_item_row(perfume_obj=p, is_gratis=is_gratis, default_ml=int(round(oi.quantity_ml)))
+            
+            # KLUCZOWA ZMIANA: Opóźnij dodanie każdego wiersza - IDENTYCZNE jak dla nowych zamówień
+            QTimer.singleShot(0, lambda row=i, perfume=p, gratis=is_gratis, qty=int(round(oi.quantity_ml)): 
+                              self.add_item_row(perfume_obj=perfume, is_gratis=gratis, default_ml=qty))
+            
             if not is_gratis:
-                # Ustawienie stanu checkboxów po dodaniu wiersza z wyśrodkowaniem
-                flask_item = self.items_table.item(i, 5)
-                if flask_item:
-                    flask_item.setCheckState(Qt.Checked if getattr(oi, "is_flask", False) else Qt.Unchecked)
-                    flask_item.setTextAlignment(Qt.AlignCenter)  # Wyśrodkowanie przy edycji
-                split_item = self.items_table.item(i, 6)
-                if split_item:
-                    split_item.setCheckState(Qt.Checked if getattr(oi, "is_split", False) else Qt.Unchecked)
-                    split_item.setTextAlignment(Qt.AlignCenter)  # Wyśrodkowanie przy edycji
+                # Zapisz stany checkboxów do późniejszego ustawienia
+                flask_state = bool(getattr(oi, "is_flask", False))
+                split_state = bool(getattr(oi, "is_split", False))
+                self._pending_checkbox_states.append({
+                    'row': i,
+                    'flask_state': flask_state,
+                    'split_state': split_state
+                })
+        
+        # KLUCZOWA ZMIANA: Opóźnij ustawienie checkboxów - IDENTYCZNE jak dla nowych zamówień
+        QTimer.singleShot(100, self.apply_pending_checkbox_states)
+
+    def apply_pending_checkbox_states(self):
+        """KLUCZOWA METODA: Zastosuj zapamiętane stany checkboxów - IDENTYCZNE jak dla nowych zamówień"""
+        for state_data in self._pending_checkbox_states:
+            row = state_data['row']
+            flask_state = state_data['flask_state']
+            split_state = state_data['split_state']
+            
+            # Ustaw checkbox flakonu
+            flask_checkbox = self.get_flask_checkbox(row)
+            if flask_checkbox:
+                flask_checkbox.setChecked(flask_state)
+            
+            # Ustaw checkbox rozbiórki
+            split_checkbox = self.get_split_checkbox(row)
+            if split_checkbox:
+                split_checkbox.setChecked(split_state)
+        
+        # Wyczyść listę po zastosowaniu
+        self._pending_checkbox_states = []
 
     def save_order(self):
         if self.items_table.rowCount() == 0:
             QMessageBox.warning(self, "Błąd", "Dodaj przynajmniej jedną pozycję!")
             return
-        if not any(
-            float(self.items_table.item(r, 2).text()) > 0
-            for r in range(self.items_table.rowCount())
-            if self.items_table.item(r, 4) and self.items_table.item(r, 4).text() == "0"
-        ):
+        
+        # Sprawdź czy jest przynajmniej jedna pozycja płatna (bezpieczne sprawdzenie)
+        has_paid_item = False
+        for r in range(self.items_table.rowCount()):
+            flag_item = self.items_table.item(r, 4)
+            price_item = self.items_table.item(r, 2)
+            if flag_item and price_item and flag_item.text() == "0" and float(price_item.text()) > 0:
+                has_paid_item = True
+                break
+
+        if not has_paid_item:
             QMessageBox.warning(self, "Błąd", "Przynajmniej jedna pozycja musi być płatna!")
             return
+        
         buyer = self.buyer_input.text().strip()
         if not buyer:
             QMessageBox.warning(self, "Błąd", "Wprowadź kupującego!")
             return
+        
         order = self.order_to_edit or Order()
         new_order = not self.order_to_edit
         if new_order:
             self.session.add(order)
             self.session.flush()
+        
         order.buyer = buyer
         order.notes = self.notes_input.toPlainText().strip()
         ship_key = self.shipping_combo.currentData()
@@ -395,12 +497,14 @@ class AddOrderDialog(QDialog):
         order.sent = self.cb_shipped.isChecked()
         order.confirmation_obtained = self.cb_confirm.isChecked()
         order.sale_date = self.sale_date_edit.date().toPyDate() if self.cb_money.isChecked() else None
+        
         if self.cb_confirm.isChecked():
             if not self.confirmation_date:
                 self.confirmation_date = date.today()
         else:
             self.confirmation_date = None
         order.confirmation_date = self.confirmation_date
+        
         is_split = any([
             self.get_split_checkbox_state(r)
             for r in range(self.items_table.rowCount())
@@ -410,10 +514,21 @@ class AddOrderDialog(QDialog):
         try:
             if self.order_to_edit:
                 self.session.query(OrderItem).filter_by(order_id=order.id).delete()
+            
             for r in range(self.items_table.rowCount()):
                 flag_item = self.items_table.item(r, 4)
                 is_gratis = (flag_item.text() == "1") if flag_item else False
-                pid = self.items_table.cellWidget(r, 0).currentData()
+                
+                # Użyj bezpiecznej metody pobierania ID perfumy
+                combo = self.items_table.cellWidget(r, 0)
+                pid = self.get_perfume_id_from_combo(combo)
+                
+                # Sprawdź czy udało się pobrać ID
+                if pid is None:
+                    QMessageBox.warning(self, "Błąd", f"Nie można zapisać pozycji w wierszu {r+1} - nie wybrano perfum.")
+                    self.session.rollback()
+                    return
+                
                 qty_widget = self.items_table.cellWidget(r, 1)
                 if isinstance(qty_widget, QComboBox):
                     qty = qty_widget.currentData() or 0
@@ -424,10 +539,16 @@ class AddOrderDialog(QDialog):
                         qty = 0
                 else:
                     qty = 0
-                price = 0.0 if is_gratis else float(self.items_table.item(r, 2).text().replace(",", "."))
-                part = 0.0 if is_gratis else float(self.items_table.item(r, 3).text().replace(",", "."))
+                
+                price_item = self.items_table.item(r, 2)
+                part_item = self.items_table.item(r, 3)
+                
+                price = 0.0 if (is_gratis or not price_item) else float(price_item.text().replace(",", "."))
+                part = 0.0 if (is_gratis or not part_item) else float(part_item.text().replace(",", "."))
+                
                 is_flask = self.get_flask_checkbox_state(r)
                 is_split_poz = self.get_split_checkbox_state(r)
+                
                 oi = OrderItem(
                     order_id=order.id,
                     perfume_id=pid,
@@ -438,9 +559,11 @@ class AddOrderDialog(QDialog):
                     is_split=is_split_poz
                 )
                 self.session.add(oi)
+            
             self.session.commit()
             QMessageBox.information(self, "Sukces", "Zamówienie zapisane.")
             self.accept()
+        
         except Exception as e:
             self.session.rollback()
             QMessageBox.critical(self, "Błąd zapisu", str(e))
@@ -448,15 +571,21 @@ class AddOrderDialog(QDialog):
     def generate_message_popup(self):
         def fmt(v):
             return f"{int(v)}" if float(v).is_integer() else f"{v:.2f}".replace(".", ",")
+        
         perfume_map = {p.id: p for p in self._perfume_cache}
         items_summary = []
         count_paid = 0
         total = 0.0
+        
         for r in range(self.items_table.rowCount()):
             flag_item = self.items_table.item(r, 4)
             if flag_item and flag_item.text() == "1":
                 continue
-            pid = self.items_table.cellWidget(r, 0).currentData()
+            
+            # Użyj bezpiecznej metody pobierania ID perfumy
+            combo = self.items_table.cellWidget(r, 0)
+            pid = self.get_perfume_id_from_combo(combo)
+            
             qty_widget = self.items_table.cellWidget(r, 1)
             if isinstance(qty_widget, QComboBox):
                 qty = qty_widget.currentData()
@@ -467,20 +596,32 @@ class AddOrderDialog(QDialog):
                     qty = 0
             else:
                 qty = 0
-            price = float(self.items_table.item(r, 2).text().replace(",", "."))
-            part = float(self.items_table.item(r, 3).text().replace(",", "."))
+            
+            price_item = self.items_table.item(r, 2)
+            part_item = self.items_table.item(r, 3)
+            
+            if not price_item or not part_item or pid is None:
+                continue
+            
+            price = float(price_item.text().replace(",", "."))
+            part = float(part_item.text().replace(",", "."))
+            
             p = perfume_map.get(pid)
             if not p:
                 continue
+            
             items_summary.append(f"{p.brand} {p.name} -> {fmt(qty)} x {fmt(price)} = {fmt(part)}zł")
             total += part
             count_paid += 1
+        
         vial_sum = count_paid * ORDER_VIAL_COST
         total += vial_sum
+        
         delivery_key = self.shipping_combo.currentData()
         is_wlasna_etykieta = delivery_key == "Własna etykieta"
         delivery_cost = 0.0 if is_wlasna_etykieta else SHIPPING_OPTIONS.get(delivery_key, 0.0)
         total_with = total + delivery_cost
+        
         msg = "Podsumowanie:\n" + "\n".join(items_summary)
         if count_paid:
             msg += f"\nDekanty -> {count_paid} x {ORDER_VIAL_COST:.0f} zł = {fmt(vial_sum)}zł"
@@ -488,6 +629,7 @@ class AddOrderDialog(QDialog):
             msg += f"\nZa dostawę {delivery_key} doliczamy {int(delivery_cost)}zł"
         msg += f"\nRazem: {fmt(total_with)}zł\n\n"
         msg += "BLIK: 694604172\nJeśli potrzeba, mogę podać numer konta bankowego"
+        
         popup = MessagePopup(msg, parent=self, checkbox_to_mark=self.cb_msg)
         popup.exec_()
 
